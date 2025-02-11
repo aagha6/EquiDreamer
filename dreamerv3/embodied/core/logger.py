@@ -197,7 +197,8 @@ class TensorBoardOutput(AsyncOutput):
         elif len(value.shape) == 3:
           tf.summary.image(name, value, step)
         elif len(value.shape) == 4:
-          self._video_summary(name, value, step)
+          if not value.shape[-1]==2:
+            self._video_summary(name, value, step)
       except Exception:
         print('Error writing summary:', name)
         raise
