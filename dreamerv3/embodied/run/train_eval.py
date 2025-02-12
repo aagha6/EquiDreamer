@@ -61,13 +61,22 @@ def train_eval(
   driver_eval.on_step(eval_replay.add)
   driver_eval.on_episode(lambda ep, worker: per_episode(ep, mode='eval'))
 
-  random_agent = embodied.RandomAgent(train_env.act_space)
+  if train_env.obs_space["image"].shape[-1]==2: ## manipulation env
+    init_agent = embodied.ExpertAgent(p_range=train_env._envs[0].p_range,
+                                      dx_range=train_env._envs[0].dx_range, 
+                                      dy_range=train_env._envs[0].dy_range,
+                                      dz_range=train_env._envs[0].dz_range,
+                                      dtheta_range=train_env._envs[0].dtheta_range)
+  else:
+    init_agent = embodied.RandomAgent(train_env.act_space)  
   print('Prefill train dataset.')
   while len(train_replay) < max(args.batch_steps, args.train_fill):
-    driver_train(random_agent.policy, steps=100)
+    driver_train(init_agent.policy, steps=100, 
+                 planner=isinstance(init_agent, embodied.ExpertAgent))
   print('Prefill eval dataset.')
   while len(eval_replay) < max(args.batch_steps, args.eval_fill):
-    driver_eval(random_agent.policy, steps=100)
+    driver_eval(init_agent.policy, steps=100, 
+                planner=isinstance(init_agent, embodied.ExpertAgent))
   logger.add(metrics.result())
   logger.write()
 
