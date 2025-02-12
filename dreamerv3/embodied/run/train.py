@@ -60,9 +60,17 @@ def train(agent, env, replay, logger, args):
   driver.on_step(replay.add)
 
   print('Prefill train dataset.')
-  random_agent = embodied.RandomAgent(env.act_space)
+  if env.obs_space["image"].shape[-1]==2: ## manipulation env
+    init_agent = embodied.ExpertAgent(p_range=env._envs[0].p_range,
+                                      dx_range=env._envs[0].dx_range, 
+                                      dy_range=env._envs[0].dy_range,
+                                      dz_range=env._envs[0].dz_range,
+                                      dtheta_range=env._envs[0].dtheta_range)
+  else:
+    init_agent = embodied.RandomAgent(env.act_space)  
   while len(replay) < max(args.batch_steps, args.train_fill):
-    driver(random_agent.policy, steps=100)
+    driver(init_agent.policy, steps=100, 
+           planner=isinstance(init_agent, embodied.ExpertAgent))
   logger.add(metrics.result())
   logger.write()
 

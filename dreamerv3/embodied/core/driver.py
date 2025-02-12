@@ -36,18 +36,22 @@ class Driver:
   def on_episode(self, callback):
     self._on_episodes.append(callback)
 
-  def __call__(self, policy, steps=0, episodes=0):
+  def __call__(self, policy, steps=0, episodes=0, planner=False):
     step, episode = 0, 0
     while step < steps or episode < episodes:
-      step, episode = self._step(policy, step, episode)
+      step, episode = self._step(policy, step, episode, planner)
 
-  def _step(self, policy, step, episode):
+  def _step(self, policy, step, episode, planner):
     assert all(len(x) == len(self._env) for x in self._acts.values())
     acts = {k: v for k, v in self._acts.items() if not k.startswith('log_')}
     obs = self._env.step(acts)
     obs = {k: convert(v) for k, v in obs.items()}
     assert all(len(x) == len(self._env) for x in obs.values()), obs
-    acts, self._state = policy(obs, self._state, **self._kwargs)
+    if planner:
+      action = self._env._envs[0].get_next_action()
+      acts, self._state = policy(action)
+    else:
+      acts, self._state = policy(obs, self._state, **self._kwargs)
     acts = {k: convert(v) for k, v in acts.items()}
     if obs['is_last'].any():
       mask = 1 - obs['is_last']

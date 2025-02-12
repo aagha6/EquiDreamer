@@ -98,6 +98,19 @@ class Manipulation(embodied.Env):
       stacked = np.concatenate([depth_img, state_tile], -1)
       return stacked
 
+  def decode_actions(self, unscaled_action):
+    unscaled_p, unscaled_dx, unscaled_dy, unscaled_dz, unscaled_dtheta = unscaled_action[0], unscaled_action[1], unscaled_action[2], unscaled_action[3], unscaled_action[4]
+
+    p = 0.5 * (unscaled_p + 1) * (self.p_range[1] - self.p_range[0]) + self.p_range[0]
+    dx = 0.5 * (unscaled_dx + 1) * (self.dx_range[1] - self.dx_range[0]) + self.dx_range[0]
+    dy = 0.5 * (unscaled_dy + 1) * (self.dy_range[1] - self.dy_range[0]) + self.dy_range[0]
+    dz = 0.5 * (unscaled_dz + 1) * (self.dz_range[1] - self.dz_range[0]) + self.dz_range[0]
+    dtheta = 0.5 * (unscaled_dtheta + 1) * (self.dtheta_range[1] - self.dtheta_range[0]) + self.dtheta_range[0]
+
+    action = np.stack([p, dx, dy, dz, dtheta])
+    
+    return action
+  
   def step(self, action):
     if action['reset'] or self._done:
       self._done = False
@@ -109,14 +122,10 @@ class Manipulation(embodied.Env):
     else:
       action = action[self._act_key]
     
-    """scaled_action = decode_actions(action, p_range=self.p_range, dx_range=self.dx_range, 
-                                            dy_range=self.dy_range, dz_range=self.dz_range, 
-                                            dtheta_range=self.dtheta_range)"""
-    scaled_action = action
+    scaled_action = self.decode_actions(action)
     (state, _, depth_img), reward, self._done = self._env.step(scaled_action, auto_reset=False)
     if self._done and self._env.env.current_episode_steps <= self.min_steps:
         self._done = False
-    #obs, reward, self._done, self._info = self._env.step(action)
     obs = self.process_obs(state=state, depth_img=depth_img)      
     return self._obs(
         obs, reward,

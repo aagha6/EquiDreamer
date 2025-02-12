@@ -191,7 +191,9 @@ def wrap_env(env, config):
     elif args.discretize:
       env = wrappers.DiscretizeAction(env, name, args.discretize)
     else:
-      env = wrappers.NormalizeAction(env, name)
+      if not isinstance(env, embodied.envs.hh_envs.Manipulation): 
+        ## manipulation envs have their own manipulation scheme!
+        env = wrappers.NormalizeAction(env, name)
   env = wrappers.ExpandScalars(env)
   if args.length:
     env = wrappers.TimeLimit(env, args.length, args.reset)
