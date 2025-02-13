@@ -17,10 +17,9 @@ def decode_actions(unscaled_action, p_range, dx_range, dy_range, dz_range, dthet
     return action
 
 class Manipulation(embodied.Env):
-  def __init__(self, task, min_steps=10, size=(128, 128), repeat=1, camera=-1, obs_key="image", act_key="action"):
+  def __init__(self, task, size=(128, 128), repeat=1, camera=-1, obs_key="image", act_key="action"):
 
     self._size = size
-    self.min_steps = min_steps+1
     workspace_size = 0.4
     dpos = 0.05
     drot = np.pi/8
@@ -124,8 +123,6 @@ class Manipulation(embodied.Env):
     
     scaled_action = self.decode_actions(action)
     (state, _, depth_img), reward, self._done = self._env.step(scaled_action, auto_reset=False)
-    if self._done and self._env.env.current_episode_steps <= self.min_steps:
-        self._done = False
     obs = self.process_obs(state=state, depth_img=depth_img)      
     return self._obs(
         obs, reward,
