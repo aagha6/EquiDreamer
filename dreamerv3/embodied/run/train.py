@@ -31,11 +31,15 @@ def train(agent, env, replay, logger, args):
     length = len(ep['reward']) - 1
     score = float(ep['reward'].astype(np.float64).sum())
     sum_abs_reward = float(np.abs(ep['reward']).astype(np.float64).sum())
+    discounted_score=0
+    for r in reversed(ep['reward'].tolist()):
+        discounted_score = r + 0.99 * discounted_score
     logger.add({
         'length': length,
         'score': score,
         'sum_abs_reward': sum_abs_reward,
         'reward_rate': (np.abs(ep['reward']) >= 0.5).mean(),
+        'discounted_score': discounted_score
     }, prefix='episode')
     print(f'Episode has {length} steps and return {score:.1f}.')
     stats = {}

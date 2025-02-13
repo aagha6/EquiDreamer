@@ -32,8 +32,11 @@ def train_eval(
   def per_episode(ep, mode):
     length = len(ep['reward']) - 1
     score = float(ep['reward'].astype(np.float64).sum())
+    discounted_score=0
+    for r in reversed(ep['reward'].tolist()):
+        discounted_score = r + 0.99 * discounted_score
     logger.add({
-        'length': length, 'score': score,
+        'length': length, 'score': score, 'discounted_score': discounted_score,
         'reward_rate': (ep['reward'] - ep['reward'].min() >= 0.1).mean(),
     }, prefix=('episode' if mode == 'train' else f'{mode}_episode'))
     print(f'Episode has {length} steps and return {score:.1f}.')
