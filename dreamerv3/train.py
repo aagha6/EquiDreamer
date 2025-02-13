@@ -191,8 +191,8 @@ def wrap_env(env, config):
     elif args.discretize:
       env = wrappers.DiscretizeAction(env, name, args.discretize)
     else:
-      if not isinstance(env, embodied.envs.hh_envs.Manipulation): 
-        ## manipulation envs have their own manipulation scheme!
+      if not env.obs_space["image"].shape[-1] == 2: 
+        ## manipulation envs have their own normalization scheme!
         env = wrappers.NormalizeAction(env, name)
   env = wrappers.ExpandScalars(env)
   if args.length:
