@@ -1,7 +1,9 @@
+import functools
 import re
 
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
 f32 = jnp.float32
@@ -190,7 +192,7 @@ class RSSM(nj.Module):
 class MultiEncoder(nj.Module):
 
   def __init__(
-      self, shapes, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
+      self, shapes, key, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
       mlp_units=512, cnn='resize', cnn_depth=48,
       cnn_blocks=2, resize='stride',
       symlog_inputs=False, minres=4, **kw):
@@ -209,7 +211,7 @@ class MultiEncoder(nj.Module):
     if cnn == 'resnet':
       self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
     else:
-      raise NotImplementedError(cnn)
+      self._cnn = ImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
     if self.mlp_shapes:
       self._mlp = MLP(None, mlp_layers, mlp_units, dist='none', **mlp_kw)
 
@@ -346,6 +348,41 @@ class ImageEncoderResnet(nj.Module):
     # print(x.shape)
     return x
 
+class ImageEncoder(nj.Module):
+
+  def __init__(self, depth, blocks, resize, minres,key, **kw):
+    self._depth = depth
+    self._blocks = blocks
+    self._resize = resize
+    self._minres = minres
+    self._kw = kw
+    self.module = functools.partial(nj.EquinoxModule, eqx.nn.Conv2d)
+    self.key=key
+
+  def __call__(self, x):
+    x = jaxutils.cast_to_compute(x) - 0.5
+    x = jnp.moveaxis(x,-1,1)
+    x = jax.vmap(self.get(f's1conv', self.module, 
+                          in_channels=3, out_channels=8, 
+                          kernel_size=3 ,stride=2, 
+                          dtype=jnp.float16, key=self.key))(x)
+    x = jax.nn.silu(x)
+    x = jax.vmap(self.get(f's2conv', self.module, 
+                          in_channels=8, out_channels=16, 
+                          kernel_size=3 ,stride=2, 
+                          dtype=jnp.float16, key=self.key))(x)
+    x = jax.nn.silu(x)
+    x = jax.vmap(self.get(f's3conv', self.module, 
+                          in_channels=16, out_channels=32, 
+                          kernel_size=3 ,stride=2, 
+                          dtype=jnp.float16, key=self.key))(x)
+    x = jax.nn.silu(x)
+    x = jax.vmap(self.get(f's4conv', self.module, 
+                          in_channels=32, out_channels=64, 
+                          kernel_size=3 ,stride=1, 
+                          dtype=jnp.float16, key=self.key))(x)
+    x = x.reshape((x.shape[0], -1))
+    return x
 
 class ImageDecoderResnet(nj.Module):
 

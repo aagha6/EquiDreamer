@@ -29,7 +29,6 @@ class JAXAgent(embodied.Agent):
     self.batch_length = config.batch_length
     self.data_loaders = config.data_loaders
     self._setup()
-    self.agent = agent_cls(obs_space, act_space, step, config, name='agent')
     self.rng = np.random.default_rng(config.seed)
 
     available = jax.devices(self.config.platform)
@@ -40,7 +39,9 @@ class JAXAgent(embodied.Agent):
     print(f'JAX devices ({jax.local_device_count()}):', available)
     print('Policy devices:', ', '.join([str(x) for x in self.policy_devices]))
     print('Train devices: ', ', '.join([str(x) for x in self.train_devices]))
-
+    #TODO: Check for a better way to pass the keys
+    key = np.stack([self._next_rngs(self.policy_devices), self._next_rngs(self.policy_devices)]).astype(np.uint32)
+    self.agent = agent_cls(obs_space, act_space, step, config, key=key, name='agent')
     self._once = True
     self._updates = embodied.Counter()
     self._should_metrics = embodied.when.Every(self.config.metrics_every)

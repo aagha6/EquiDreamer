@@ -373,7 +373,7 @@ class Optimizer(nj.Module):
     if self.scaling:
       self.opt = optax.apply_if_finite(self.opt, max_consecutive_errors=1000)
       self.grad_scale = nj.Variable(
-          jnp.array, 1e4, jnp.float32, name='grad_scale')
+          jnp.array, 1e4, jnp.float16, name='grad_scale')
       self.good_steps = nj.Variable(
           jnp.array, 0, jnp.int32, name='good_steps')
 
@@ -390,7 +390,7 @@ class Optimizer(nj.Module):
     loss, params, grads, aux = nj.grad(
         wrapped, modules, has_aux=True)(*args, **kwargs)
     if not self.PARAM_COUNTS[self.path]:
-      count = sum([np.prod(x.shape) for x in params.values()])
+      count = sum(x.size for x in jax.tree_leaves(params))
       print(f'Optimizer {self.name} has {count:,} variables.')
       self.PARAM_COUNTS[self.path] = count
     if parallel():
@@ -423,9 +423,9 @@ class Optimizer(nj.Module):
     self.good_steps.write(
         keep.astype(jnp.int32) * (self.good_steps.read() + 1))
     self.grad_scale.write(jnp.clip(
-        keep.astype(jnp.float32) * self.grad_scale.read() +
-        incr.astype(jnp.float32) * self.grad_scale.read() * 2 +
-        decr.astype(jnp.float32) * self.grad_scale.read() / 2,
+        keep.astype(jnp.float16) * self.grad_scale.read() +
+        incr.astype(jnp.float16) * self.grad_scale.read() * 2 +
+        decr.astype(jnp.float16) * self.grad_scale.read() / 2,
         1e-4, 1e4))
     return finite
 
