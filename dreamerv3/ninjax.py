@@ -7,6 +7,7 @@ from functools import partial as bind
 
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 
 __version__ = '0.9.0'
 
@@ -486,6 +487,21 @@ class FlaxModule(Module):
     state = self.get('state', self.module.init, rng(), *args, **kwargs)
     return self.module.apply(state, *args, **kwargs)
 
+def init_fn(module, args, kwargs):
+      model = module(*args, **kwargs)
+      #return eqx.partition(model, eqx.is_inexact_array)[0]
+      return model
+
+class EquinoxModule(Module):
+
+  def __init__(self, ctor, *args, **kwargs):
+    self.module = ctor
+    self.args = args
+    self.kwargs = kwargs
+    
+  def __call__(self, *args, **kwargs):    
+    params = self.get('state', init_fn, self.module, self.args, self.kwargs)
+    return params(*args, **kwargs)
 
 class OptaxModule(Module):
 
