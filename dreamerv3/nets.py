@@ -357,30 +357,40 @@ class ImageEncoder(nj.Module):
     self._minres = minres
     self._kw = kw
     self.module = functools.partial(nj.EquinoxModule, eqx.nn.Conv2d)
+    self._norm1 = Norm('layer', name='norm1')
+    self._norm2 = Norm('layer', name='norm2')
+    self._norm3 = Norm('layer', name='norm3')
+    self._norm4 = Norm('layer', name='norm4')    
     self.key=key
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
     x = jnp.moveaxis(x,-1,1)
     x = jax.vmap(self.get(f's1conv', self.module, 
-                          in_channels=3, out_channels=8, 
-                          kernel_size=3 ,stride=2, 
+                          in_channels=3, out_channels=32, 
+                          kernel_size=4 ,stride=2, 
                           dtype=jnp.float16, key=self.key))(x)
-    x = jax.nn.silu(x)
+    x = self._norm1(x)
+    x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's2conv', self.module, 
-                          in_channels=8, out_channels=16, 
-                          kernel_size=3 ,stride=2, 
+                          in_channels=32, out_channels=32, 
+                          kernel_size=4 ,stride=2, 
                           dtype=jnp.float16, key=self.key))(x)
-    x = jax.nn.silu(x)
+    x = self._norm2(x)
+    x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's3conv', self.module, 
-                          in_channels=16, out_channels=32, 
-                          kernel_size=3 ,stride=2, 
+                          in_channels=32, out_channels=32, 
+                          kernel_size=4 ,stride=2, 
                           dtype=jnp.float16, key=self.key))(x)
-    x = jax.nn.silu(x)
+    x = self._norm3(x)
+    x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's4conv', self.module, 
-                          in_channels=32, out_channels=64, 
-                          kernel_size=3 ,stride=1, 
+                          in_channels=32, out_channels=32, 
+                          kernel_size=4 ,stride=2, 
                           dtype=jnp.float16, key=self.key))(x)
+    x = self._norm4(x)
+    x = jax.nn.elu(x)
+
     x = x.reshape((x.shape[0], -1))
     return x
 
