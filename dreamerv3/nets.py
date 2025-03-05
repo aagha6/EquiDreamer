@@ -369,25 +369,25 @@ class ImageEncoder(nj.Module):
     x = jax.vmap(self.get(f's1conv', self.module, 
                           in_channels=3, out_channels=32, 
                           kernel_size=4 ,stride=2, 
-                          dtype=jnp.float16, key=self.key))(x)
+                          dtype=jnp.float32, key=self.key))(x)
     x = self._norm1(x)
     x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's2conv', self.module, 
                           in_channels=32, out_channels=32, 
                           kernel_size=4 ,stride=2, 
-                          dtype=jnp.float16, key=self.key))(x)
+                          dtype=jnp.float32, key=self.key))(x)
     x = self._norm2(x)
     x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's3conv', self.module, 
                           in_channels=32, out_channels=32, 
                           kernel_size=4 ,stride=2, 
-                          dtype=jnp.float16, key=self.key))(x)
+                          dtype=jnp.float32, key=self.key))(x)
     x = self._norm3(x)
     x = jax.nn.elu(x)
     x = jax.vmap(self.get(f's4conv', self.module, 
                           in_channels=32, out_channels=32, 
                           kernel_size=4 ,stride=2, 
-                          dtype=jnp.float16, key=self.key))(x)
+                          dtype=jnp.float32, key=self.key))(x)
     x = self._norm4(x)
     x = jax.nn.elu(x)
 
