@@ -4,6 +4,8 @@ import re
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+import escnn_jax.nn as nn
+from escnn_jax import gspaces
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
 f32 = jnp.float32
@@ -15,7 +17,7 @@ from . import jaxutils
 from . import ninjax as nj
 cast = jaxutils.cast_to_compute
 
-
+  
 class RSSM(nj.Module):
 
   def __init__(
@@ -210,6 +212,8 @@ class MultiEncoder(nj.Module):
     mlp_kw = {**kw, 'symlog_inputs': symlog_inputs, 'name': 'mlp'}
     if cnn == 'resnet':
       self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
+    elif cnn == 'equiv':
+      self._cnn = EquivImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
     else:
       self._cnn = ImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
     if self.mlp_shapes:
@@ -394,6 +398,53 @@ class ImageEncoder(nj.Module):
     x = x.reshape((x.shape[0], -1))
     return x
 
+class EquivImageEncoder(nj.Module):
+
+  def __init__(self, depth, blocks, resize, minres,key, **kw):
+    self._depth = depth
+    self._blocks = blocks
+    self._resize = resize
+    self._minres = minres
+    self._kw = kw
+    self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
+    r2_act = gspaces.flip2dOnR2()    
+    self.feat_type_in  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
+    self.feat_type_out  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
+    self.escnn1 = self.module(in_type=self.feat_type_in, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=4 ,stride=2, 
+                          key=key, name='s1conv')
+    self.escnn2 = self.module(in_type=self.feat_type_out, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=4 ,stride=2, 
+                          key=key, name='s2conv')
+    self.escnn3 = self.module(in_type=self.feat_type_out, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=4 ,stride=2, 
+                          key=key, name='s3conv')
+    self.escnn4 = self.module(in_type=self.feat_type_out, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=4 ,stride=2, 
+                          key=key, name='s4conv')
+    self.equiv_relu = nn.ReLU(self.feat_type_out)
+    self.key=key
+
+  def __call__(self, x):
+    x = jaxutils.cast_to_compute(x) - 0.5
+    x = jnp.moveaxis(x,-1,1)
+    x = nn.GeometricTensor(x, self.feat_type_in)
+    x = self.escnn1(x)
+    x = self.equiv_relu(x)
+    x = self.escnn2(x)
+    x = self.equiv_relu(x)
+    x = self.escnn3(x)
+    x = self.equiv_relu(x)
+    x = self.escnn4(x)
+    x = self.equiv_relu(x)
+    x = x.tensor
+    x = x.reshape((x.shape[0], -1))
+    return x
+  
 class ImageDecoderResnet(nj.Module):
 
   def __init__(self, shape, depth, blocks, resize, minres, sigmoid, **kw):
