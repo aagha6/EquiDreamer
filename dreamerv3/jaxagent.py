@@ -162,9 +162,9 @@ class JAXAgent(embodied.Agent):
     self._report = nj.pure(self.agent.report)
     if len(self.train_devices) == 1:
       kw = dict(device=self.train_devices[0])
-      self._init_train = nj.jit(self._init_train, **kw)
-      self._train = nj.jit(self._train, **kw)
-      self._report = nj.jit(self._report, **kw)
+      self._init_train = jax.jit(self._init_train, **kw)
+      self._train = jax.jit(self._train, **kw)
+      self._report = jax.jit(self._report, **kw)
     else:
       kw = dict(devices=self.train_devices)
       self._init_train = nj.pmap(self._init_train, 'i', **kw)
@@ -172,8 +172,8 @@ class JAXAgent(embodied.Agent):
       self._report = nj.pmap(self._report, 'i', **kw)
     if len(self.policy_devices) == 1:
       kw = dict(device=self.policy_devices[0])
-      self._init_policy = nj.jit(self._init_policy, **kw)
-      self._policy = nj.jit(self._policy, static=['mode'], **kw)
+      self._init_policy = jax.jit(self._init_policy, **kw)
+      self._policy = jax.jit(self._policy, static_argnames=["mode"], **kw)
     else:
       kw = dict(devices=self.policy_devices)
       self._init_policy = nj.pmap(self._init_policy, 'i', **kw)
@@ -228,7 +228,7 @@ class JAXAgent(embodied.Agent):
     data = self._dummy_batch({**obs_space, **act_space}, dims)
     data = self._convert_inps(data, self.train_devices)
     state, varibs = self._init_train(varibs, rng, data['is_first'])
-    varibs = self._train(varibs, rng, data, state, init_only=True)
+    _, varibs = self._train(varibs, rng, data, state)
     # obs = self._dummy_batch(obs_space, (1,))
     # state, varibs = self._init_policy(varibs, rng, obs['is_first'])
     # varibs = self._policy(
