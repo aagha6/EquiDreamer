@@ -411,9 +411,12 @@ class Module(object, metaclass=ModuleMeta):
     if 'name' in inspect.signature(ctor).parameters:
       kwargs['name'] = name
     value = ctor(*args, **kwargs)
-    flat, _ = jax.tree_util.tree_flatten(value)
-    if all(isinstance(x, jnp.ndarray) for x in flat):
-      context()[path] = value
+    #flat, _ = jax.tree_util.tree_flatten(value)
+    filtered_value = eqx.filter(value, eqx.is_array)
+    if filtered_value is not None:
+      context()[path] = filtered_value
+    #if all(isinstance(x, jnp.ndarray) for x in flat):
+    #  context()[path] = value
     else:
       self._submodules[name] = value
     return value
