@@ -16,7 +16,7 @@ sg = lambda x: tree_map(jax.lax.stop_gradient, x)
 from . import jaxutils
 from . import ninjax as nj
 cast = jaxutils.cast_to_compute
-
+EqxConv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
   
 class RSSM(nj.Module):
 
@@ -134,8 +134,12 @@ class RSSM(nj.Module):
 
   def _gru(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
-    kw = {**self._kw, 'act': 'none', 'units': 3 * self._deter}
-    x = self.get('gru', Linear, **kw)(x)
+    kw = {'in_channels': self._deter*2, 
+          'out_channels': self._deter*3, 
+          'kernel_size':1, 'stride':1,
+          'key': nj.rng()}
+    x = jax.vmap(self.get('gru', EqxConv, **kw))(x[:,:, jnp.newaxis, jnp.newaxis])
+    x = self.get('norm', Norm, 'layer')(x.mean(-1).mean(-1))
     reset, cand, update = jnp.split(x, 3, -1)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
