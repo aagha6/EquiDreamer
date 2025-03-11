@@ -508,7 +508,14 @@ class EquinoxModule(Module):
 
 class ESCNNModule(Module):
   def __init__(self, ctor, *args, **kwargs):
-    self.module = ctor(*args, **kwargs)
+    module = ctor(*args, **kwargs)
+    if ctor == eqx.nn.Conv2d:
+      initializer = jax.nn.initializers.glorot_normal(in_axis=1, out_axis=0,)
+      new_weight = initializer(kwargs['key'], module.weight.shape, module.weight.dtype)
+      where = lambda l: l.weight
+      self.module = eqx.tree_at(where, module, new_weight)
+    else:
+      self.module = module
 
   def __call__(self, *args, **kwargs):
     def init_fn(module):
