@@ -22,7 +22,7 @@ class RSSM(nj.Module):
 
   def __init__(
       self, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, **kw):
+      unimix=0.01, action_clip=1.0, conv_gru=False, **kw):
     self._deter = deter
     self._stoch = stoch
     self._classes = classes
@@ -30,6 +30,7 @@ class RSSM(nj.Module):
     self._initial = initial
     self._unimix = unimix
     self._action_clip = action_clip
+    self.conv_gru = conv_gru
     self._kw = kw
 
   def initial(self, bs):
@@ -118,7 +119,10 @@ class RSSM(nj.Module):
       prev_action = prev_action.reshape(shape)
     x = jnp.concatenate([prev_stoch, prev_action], -1)
     x = self.get('img_in', Linear, **self._kw)(x)
-    x, deter = self._gru(x, prev_state['deter'])
+    if self.conv_gru:
+      x, deter = self._conv_gru(x, prev_state['deter'])
+    else:
+      x, deter = self._gru(x, prev_state['deter'])
     x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
@@ -132,14 +136,25 @@ class RSSM(nj.Module):
     dist = self.get_dist(stats)
     return cast(dist.mode())
 
-  def _gru(self, x, deter):
+  def _conv_gru(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
-    kw = {'in_channels': self._deter*2, 
+    kw = {'in_channels': self._deter + self._kw['units'], 
           'out_channels': self._deter*3, 
           'kernel_size':1, 'stride':1,
           'key': nj.rng()}
     x = jax.vmap(self.get('gru', EqxConv, **kw))(x[:,:, jnp.newaxis, jnp.newaxis])
     x = self.get('norm', Norm, 'layer')(x.mean(-1).mean(-1))
+    reset, cand, update = jnp.split(x, 3, -1)
+    reset = jax.nn.sigmoid(reset)
+    cand = jnp.tanh(reset * cand)
+    update = jax.nn.sigmoid(update - 1)
+    deter = update * cand + (1 - update) * deter
+    return deter, deter
+  
+  def _gru(self, x, deter):
+    x = jnp.concatenate([deter, x], -1)
+    kw = {**self._kw, 'act': 'none', 'units': 3 * self._deter}
+    x = self.get('gru', Linear, **kw)(x)
     reset, cand, update = jnp.split(x, 3, -1)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
