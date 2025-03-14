@@ -431,20 +431,28 @@ class EquivImageEncoder(nj.Module):
     self.feat_type_out  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
     self.escnn1 = self.module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out, 
-                          kernel_size=4 ,stride=2, 
+                          kernel_size=3 ,stride=2, padding=1,
                           key=key, name='s1conv')
     self.escnn2 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
-                          kernel_size=4 ,stride=2, 
+                          kernel_size=3 ,stride=2, padding=1,
                           key=key, name='s2conv')
     self.escnn3 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
-                          kernel_size=4 ,stride=2, 
+                          kernel_size=3 ,stride=2, padding=1, 
                           key=key, name='s3conv')
     self.escnn4 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
-                          kernel_size=4 ,stride=2, 
+                          kernel_size=3 ,stride=2, padding=1, 
                           key=key, name='s4conv')
+    self.escnn5 = self.module(in_type=self.feat_type_out, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=3 ,stride=2, padding=1, 
+                          key=key, name='s5conv')
+    self.escnn6 = self.module(in_type=self.feat_type_out, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=3 ,stride=2, padding=1,
+                          key=key, name='s6conv')
     self.equiv_relu = nn.ReLU(self.feat_type_out)
     self.key=key
 
@@ -459,6 +467,10 @@ class EquivImageEncoder(nj.Module):
     x = self.escnn3(x)
     x = self.equiv_relu(x)
     x = self.escnn4(x)
+    x = self.equiv_relu(x)
+    x = self.escnn5(x)
+    x = self.equiv_relu(x)
+    x = self.escnn6(x)
     x = self.equiv_relu(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
