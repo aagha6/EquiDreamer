@@ -187,17 +187,20 @@ class RSSM(nj.Module):
                       EquivLinear,
                       **{"net":self.init_reset,
                       'in_type':self._field_type_gru_in,
-                      'out_type':self._field_type_deter})(x)
+                      'out_type':self._field_type_deter,
+                      'norm':self._kw['norm']})(x)
     cand = self.get('gru_cand',
                     EquivLinear,
                     **{"net":self.init_cand,
                     'in_type':self._field_type_gru_in,
-                    'out_type':self._field_type_deter})(x)
+                    'out_type':self._field_type_deter,
+                    'norm':self._kw['norm']})(x)
     update = self.get('gru_update',
                     EquivLinear,
                     **{"net":self.init_update,
                     'in_type':self._field_type_gru_in,
-                    'out_type':self._field_type_deter})(x)
+                    'out_type':self._field_type_deter,
+                    'norm':self._kw['norm']})(x)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
     update = jax.nn.sigmoid(update - 1)
@@ -774,12 +777,12 @@ class Linear(nj.Module):
 class EquivLinear(nj.Module):
 
   def __init__(
-      self, net, in_type, out_type, act='none'):
-    self._act = act
+      self, net, in_type, out_type, act='none', norm='none'):
     self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
     self._ecnn = self.module(net=net, name='conv')
     self.in_type=in_type
     self.act = nn.ReLU(in_type=out_type)
+    self._norm = norm
 
   def __call__(self, x):
     x = x[:, :, jnp.newaxis, jnp.newaxis]
@@ -787,7 +790,8 @@ class EquivLinear(nj.Module):
     x = nn.GeometricTensor(x, self.in_type)
     x = self._ecnn(x)
     x = self.act(x)
-    return x.tensor.mean(-1).mean(-1)
+    x = self.get('norm', Norm, self._norm)(x.tensor.mean(-1).mean(-1))
+    return x
 
 class Norm(nj.Module):
 
