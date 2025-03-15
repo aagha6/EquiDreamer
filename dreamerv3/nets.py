@@ -22,7 +22,7 @@ class RSSM(nj.Module):
 
   def __init__(
       self, key, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, conv_gru=False, **kw):
+      unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, **kw):
     self._deter = deter
     self._stoch = stoch
     self._classes = classes
@@ -34,7 +34,7 @@ class RSSM(nj.Module):
     self._kw = kw
 
     self.key = key
-    self._equiv = True
+    self._equiv=equiv
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
