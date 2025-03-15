@@ -16,12 +16,12 @@ sg = lambda x: tree_map(jax.lax.stop_gradient, x)
 from . import jaxutils
 from . import ninjax as nj
 cast = jaxutils.cast_to_compute
-EqxConv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
+eqx_conv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
   
 class RSSM(nj.Module):
 
   def __init__(
-      self, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -33,18 +33,46 @@ class RSSM(nj.Module):
     self.conv_gru = conv_gru
     self._kw = kw
 
+    self.key = key
+    self._equiv = True
+    if self.conv_gru and self._equiv:
+      raise ValueError("both can't be True")    
+    if self._equiv:
+      self.init_equiv_nets()
+
+  def init_equiv_nets(self):
+    self._r2_act = gspaces.flip2dOnR2()
+    self._field_type_deter  = nn.FieldType(self._r2_act,
+                                         self._deter * [self._r2_act.regular_repr])
+    self._field_type_gru_in  = nn.FieldType(self._r2_act, self._kw['units'] * [self._r2_act.trivial_repr] + self._deter * [self._r2_act.regular_repr])
+    
+    gru_kw = {"in_type":self._field_type_gru_in, 
+              "out_type":self._field_type_deter, 
+              "kernel_size":1, 'stride':1, 'key':self.key}
+    self.init_reset = nn.R2Conv(**gru_kw)
+    self.init_update = nn.R2Conv(**gru_kw)
+    self.init_cand = nn.R2Conv(**gru_kw)
+    self.gru_equiv_relu = nn.ReLU(self._field_type_deter)
+
   def initial(self, bs):
     if self._classes:
-      state = dict(
-          deter=jnp.zeros([bs, self._deter], f32),
-          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
+      if self._equiv:
+        raise ValueError("can't use equivariance here")      
+      else:
+        state = dict(
+            deter=jnp.zeros([bs, self._deter], f32),
+            logit=jnp.zeros([bs, self._stoch, self._classes], f32),
+            stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
     else:
-      state = dict(
-          deter=jnp.zeros([bs, self._deter], f32),
+      state = dict(          
           mean=jnp.zeros([bs, self._stoch], f32),
           std=jnp.ones([bs, self._stoch], f32),
           stoch=jnp.zeros([bs, self._stoch], f32))
+      if self._equiv:
+        #TODO:extend to other types of equivariance
+        state['deter'] = jnp.zeros([bs, self._deter * 2], f32)
+      else:
+        state['deter'] = jnp.zeros([bs, self._deter], f32)
     if self._initial == 'zeros':
       return cast(state)
     elif self._initial == 'learned':
@@ -62,7 +90,7 @@ class RSSM(nj.Module):
     step = lambda prev, inputs: self.obs_step(prev[0], *inputs)
     inputs = swap(action), swap(embed), swap(is_first)
     start = state, state
-    post, prior = jaxutils.scan(step, inputs, start, self._unroll)
+    post, prior = jaxutils.scan(step, inputs, start, self._unroll, modify=True)
     post = {k: swap(v) for k, v in post.items()}
     prior = {k: swap(v) for k, v in prior.items()}
     return post, prior
@@ -121,6 +149,8 @@ class RSSM(nj.Module):
     x = self.get('img_in', Linear, **self._kw)(x)
     if self.conv_gru:
       x, deter = self._conv_gru(x, prev_state['deter'])
+    elif self._equiv:
+      x, deter = self._equiv_gru(x, prev_state['deter'])
     else:
       x, deter = self._gru(x, prev_state['deter'])
     x = self.get('img_out', Linear, **self._kw)(x)
@@ -142,7 +172,7 @@ class RSSM(nj.Module):
           'out_channels': self._deter*3, 
           'kernel_size':1, 'stride':1,
           'key': nj.rng()}
-    x = jax.vmap(self.get('gru', EqxConv, **kw))(x[:,:, jnp.newaxis, jnp.newaxis])
+    x = jax.vmap(self.get('gru', eqx_conv, **kw))(x[:, :, jnp.newaxis, jnp.newaxis])
     x = self.get('norm', Norm, 'layer')(x.mean(-1).mean(-1))
     reset, cand, update = jnp.split(x, 3, -1)
     reset = jax.nn.sigmoid(reset)
@@ -150,7 +180,30 @@ class RSSM(nj.Module):
     update = jax.nn.sigmoid(update - 1)
     deter = update * cand + (1 - update) * deter
     return deter, deter
-  
+
+  def _equiv_gru(self, x, deter):
+    x = jnp.concatenate([x, deter], 1)
+    reset = self.get('gru_reset',
+                      EquivLinear,
+                      **{"net":self.init_reset,
+                      'in_type':self._field_type_gru_in,
+                      'out_type':self._field_type_deter})(x)
+    cand = self.get('gru_cand',
+                    EquivLinear,
+                    **{"net":self.init_cand,
+                    'in_type':self._field_type_gru_in,
+                    'out_type':self._field_type_deter})(x)
+    update = self.get('gru_update',
+                    EquivLinear,
+                    **{"net":self.init_update,
+                    'in_type':self._field_type_gru_in,
+                    'out_type':self._field_type_deter})(x)
+    reset = jax.nn.sigmoid(reset)
+    cand = jnp.tanh(reset * cand)
+    update = jax.nn.sigmoid(update - 1)
+    deter = update * cand + (1 - update) * deter
+    return deter, deter
+ 
   def _gru(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
     kw = {**self._kw, 'act': 'none', 'units': 3 * self._deter}
@@ -718,6 +771,23 @@ class Linear(nj.Module):
     x = self._act(x)
     return x
 
+class EquivLinear(nj.Module):
+
+  def __init__(
+      self, net, in_type, out_type, act='none'):
+    self._act = act
+    self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
+    self._ecnn = self.module(net=net, name='conv')
+    self.in_type=in_type
+    self.act = nn.ReLU(in_type=out_type)
+
+  def __call__(self, x):
+    x = x[:, :, jnp.newaxis, jnp.newaxis]
+    assert len(x.shape)==4
+    x = nn.GeometricTensor(x, self.in_type)
+    x = self._ecnn(x)
+    x = self.act(x)
+    return x.tensor.mean(-1).mean(-1)
 
 class Norm(nj.Module):
 
