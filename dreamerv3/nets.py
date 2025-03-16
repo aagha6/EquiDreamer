@@ -782,17 +782,19 @@ class EquivLinear(nj.Module):
       self, net, in_type, out_type, act='none', norm='none'):
     self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
     self._ecnn = self.module(net=net, name='conv')
-    self.in_type=in_type
-    self.act = nn.ReLU(in_type=out_type)
+    self._in_type=in_type
+    self._out_type=out_type
+    self._act = get_act(act, in_type=out_type)
     self._norm = norm
 
   def __call__(self, x):
     x = x[:, :, jnp.newaxis, jnp.newaxis]
     assert len(x.shape)==4
-    x = nn.GeometricTensor(x, self.in_type)
+    x = nn.GeometricTensor(x, self._in_type)
     x = self._ecnn(x)
-    x = self.act(x)
     x = self.get('norm', Norm, self._norm)(x.tensor.mean(-1).mean(-1))
+    x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._out_type)
+    x = self._act(x).tensor.mean(-1).mean(-1)
     return x
 
 class Norm(nj.Module):
