@@ -52,7 +52,6 @@ class RSSM(nj.Module):
     self.init_reset = nn.R2Conv(**gru_kw)
     self.init_update = nn.R2Conv(**gru_kw)
     self.init_cand = nn.R2Conv(**gru_kw)
-    self.gru_equiv_relu = nn.ReLU(self._field_type_deter)
 
   def initial(self, bs):
     if self._classes:
@@ -188,19 +187,22 @@ class RSSM(nj.Module):
                       **{"net":self.init_reset,
                       'in_type':self._field_type_gru_in,
                       'out_type':self._field_type_deter,
-                      'norm':self._kw['norm']})(x)
+                      'norm':self._kw['norm'],
+                      'act':'none'})(x)
     cand = self.get('gru_cand',
                     EquivLinear,
                     **{"net":self.init_cand,
                     'in_type':self._field_type_gru_in,
                     'out_type':self._field_type_deter,
-                    'norm':self._kw['norm']})(x)
+                    'norm':self._kw['norm'],
+                    'act':'none'})(x)
     update = self.get('gru_update',
                     EquivLinear,
                     **{"net":self.init_update,
                     'in_type':self._field_type_gru_in,
                     'out_type':self._field_type_deter,
-                    'norm':self._kw['norm']})(x)
+                    'norm':self._kw['norm'],
+                    'act':'none'})(x)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
     update = jax.nn.sigmoid(update - 1)
@@ -889,11 +891,14 @@ class Initializer:
       return shape[-2] * space, shape[-1] * space
 
 
-def get_act(name):
+def get_act(name, in_type=None):
   if callable(name):
     return name
   elif name == 'none':
     return lambda x: x
+  elif name == 'equiv_relu':
+    assert in_type is not None
+    return lambda x: nn.ReLU(in_type=in_type)(x)
   elif name == 'mish':
     return lambda x: x * jnp.tanh(jax.nn.softplus(x))
   elif hasattr(jax.nn, name):
