@@ -234,7 +234,16 @@ class RSSM(nj.Module):
     return cast(prior)
 
   def get_stoch(self, deter):
-    x = self.get('img_out', Linear, **self._kw)(deter)
+    if self._equiv:
+      x = self.get('img_out', 
+                  EquivLinear, 
+                  **{"net":self.init_img_out, 
+                  'in_type':self._field_type_deter,
+                  'out_type':self._field_type_embed,
+                  'norm':self._kw['norm'],
+                  'act':'equiv_relu'})(deter)
+    else:
+      x = self.get('img_out', Linear, **self._kw)(deter)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
     return cast(dist.mode())
