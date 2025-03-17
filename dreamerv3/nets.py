@@ -46,7 +46,7 @@ class RSSM(nj.Module):
                                                 [self._r2_act.regular_repr])
     #TODO:try equiv std
     self._field_type_std  = nn.FieldType(self._r2_act,
-                                               self._stoch * [self._r2_act.trivial_repr])
+                                               self._stoch * [self._r2_act.regular_repr])
     self._field_type_deter  = nn.FieldType(self._r2_act,
                                          self._deter * [self._r2_act.regular_repr])
     #TODO: will need to adapt
@@ -81,8 +81,7 @@ class RSSM(nj.Module):
                                     kernel_size=1, key=self.key)
     gru_kw = {"in_type":self._field_type_gru_in,
               "out_type":self._field_type_deter, 
-              "kernel_size":1, 'stride':1, 
-              'key':self.key}    
+              "kernel_size":1, 'key':self.key}    
     self.init_reset = nn.R2Conv(**gru_kw)
     self.init_update = nn.R2Conv(**gru_kw)
     self.init_cand = nn.R2Conv(**gru_kw)
@@ -328,10 +327,7 @@ class RSSM(nj.Module):
                           **{"net":self.init_stoch_std, 
                             'in_type':self._field_type_embed,
                             'out_type':self._field_type_std,
-                            'act':'none'})(x)
-        #TODO:more generic
-        #TODO:is invariance done correctly here ?
-        std=std.repeat(2,-1)        
+                            'act':'none'})(x)        
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
