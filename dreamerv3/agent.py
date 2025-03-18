@@ -126,7 +126,9 @@ class WorldModel(nj.Module):
     self.encoder = nets.MultiEncoder(shapes, key, **config.encoder, name='enc')
     self.rssm = nets.RSSM(key, **config.rssm, name='rssm')
     self.heads = {
-        'decoder': nets.MultiDecoder(shapes, **config.decoder, name='dec'),
+        'decoder': nets.MultiDecoder(shapes, key, deter=config.rssm['deter'], 
+                                     stoch=config.rssm['stoch'], **config.decoder, 
+                                     name='dec'),
         'reward': nets.MLP((), **config.reward_head, name='rew'),
         'cont': nets.MLP((), **config.cont_head, name='cont')}
     self.opt = jaxutils.Optimizer(name='model_opt', **config.model_opt)

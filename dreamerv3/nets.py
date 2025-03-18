@@ -424,10 +424,10 @@ class MultiEncoder(nj.Module):
 class MultiDecoder(nj.Module):
 
   def __init__(
-      self, shapes, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
+      self, shapes, key, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
       mlp_layers=4, mlp_units=512, cnn='resize', cnn_depth=48, cnn_blocks=2,
       image_dist='mse', vector_dist='mse', resize='stride', bins=255,
-      outscale=1.0, minres=4, cnn_sigmoid=False, **kw):
+      outscale=1.0, minres=4, cnn_sigmoid=False, deter=None, stoch=None, **kw):
     excluded = ('is_first', 'is_last', 'is_terminal', 'reward')
     shapes = {k: v for k, v in shapes.items() if k not in excluded}
     self.cnn_shapes = {
@@ -448,6 +448,9 @@ class MultiDecoder(nj.Module):
       if cnn == 'resnet':
         self._cnn = ImageDecoderResnet(
             shape, cnn_depth, cnn_blocks, resize, **cnn_kw, name='cnn')
+      elif cnn=='equiv':
+        assert (deter is not None and stoch is not None)
+        self._cnn = EquivImageDecoder(key=key, deter=deter, stoch=stoch, name='cnn')
       else:
         raise NotImplementedError(cnn)
     if self.mlp_shapes:
@@ -633,6 +636,68 @@ class EquivImageEncoder(nj.Module):
     x = self.equiv_relu(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
+    return x
+  
+class EquivImageDecoder(nj.Module):
+
+  def __init__(self, deter, stoch, key, **kw):
+    module = functools.partial(nj.ESCNNModule, nn.R2Conv)
+    r2_act = gspaces.flip2dOnR2()    
+    self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
+    self.feat_type_hidden  = nn.FieldType(r2_act,  64*[r2_act.regular_repr])
+    self.feat_type_out  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
+    self.escnn1 = module(in_type=self.feat_type_in, 
+                          out_type=self.feat_type_hidden, 
+                          kernel_size=3 ,stride=1, padding=1,
+                          key=key, name='s1conv')
+    self.escnn2 = module(in_type=self.feat_type_hidden, 
+                          out_type=self.feat_type_hidden, 
+                          kernel_size=3 ,stride=1, padding=1,
+                          key=key, name='s2conv')
+    self.escnn3 = module(in_type=self.feat_type_hidden, 
+                          out_type=self.feat_type_hidden, 
+                          kernel_size=3 ,stride=1, padding=1, 
+                          key=key, name='s3conv')
+    self.escnn4 = module(in_type=self.feat_type_hidden, 
+                          out_type=self.feat_type_hidden, 
+                          kernel_size=3 ,stride=1, padding=1, 
+                          key=key, name='s4conv')
+    self.escnn5 = module(in_type=self.feat_type_hidden, 
+                          out_type=self.feat_type_hidden, 
+                          kernel_size=3 ,stride=1, padding=1, 
+                          key=key, name='s5conv')
+    self.escnn6 = module(in_type=self.feat_type_hidden, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=3 ,stride=1, padding=1, 
+                          key=key, name='s6onv')
+    self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+    self.key=key
+
+  def __call__(self, x):
+    x = x[:,:,jnp.newaxis, jnp.newaxis]
+    x = jnp.repeat(jnp.repeat(x, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_in)
+    x = self.escnn1(x)
+    x = self.equiv_relu(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_hidden)
+    x = self.escnn2(x)
+    x = self.equiv_relu(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_hidden)
+    x = self.escnn3(x)
+    x = self.equiv_relu(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_hidden)
+    x = self.escnn4(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_hidden)
+    x = self.escnn5(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = nn.GeometricTensor(x, self.feat_type_hidden)
+    x = self.escnn6(x)
+    x = jaxutils.cast_to_compute(x.tensor) + 0.5
+    x = jnp.moveaxis(x,1,-1)
     return x
   
 class ImageDecoderResnet(nj.Module):
