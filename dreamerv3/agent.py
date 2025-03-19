@@ -128,9 +128,17 @@ class WorldModel(nj.Module):
     self.heads = {
         'decoder': nets.MultiDecoder(shapes, key, deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'], **config.decoder, 
-                                     name='dec'),
-        'reward': nets.MLP((), **config.reward_head, name='rew'),
-        'cont': nets.MLP((), **config.cont_head, name='cont')}
+                                     name='dec')}
+    if config.rssm['equiv']:
+      self.heads['reward'] = nets.EquivtMLP((), deter=config.rssm['deter'], 
+                                     stoch=config.rssm['stoch'], key=key,
+                                     **config.reward_head, name='rew')
+      self.heads['cont'] = nets.EquivtMLP((), deter=config.rssm['deter'], 
+                                      stoch=config.rssm['stoch'], key=key,
+                                      **config.cont_head, name='cont')
+    else:
+      self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
+      self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
     self.opt = jaxutils.Optimizer(name='model_opt', **config.model_opt)
     scales = self.config.loss_scales.copy()
     image, vector = scales.pop('image'), scales.pop('vector')
