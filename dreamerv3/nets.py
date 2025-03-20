@@ -644,65 +644,82 @@ class EquivImageDecoder(nj.Module):
     module = functools.partial(nj.ESCNNModule, nn.R2Conv)
     r2_act = gspaces.flip2dOnR2()    
     self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
-    self.feat_type_hidden  = nn.FieldType(r2_act,  64*[r2_act.regular_repr])
+    self.feat_type_linear  = nn.FieldType(r2_act,  128 * 16 * [r2_act.regular_repr])
+    self.feat_type_hidden1  = nn.FieldType(r2_act,  128*[r2_act.regular_repr])
+    self.feat_type_hidden2  = nn.FieldType(r2_act,  64*[r2_act.regular_repr])
+    self.feat_type_hidden3  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
+    self.feat_type_hidden4  = nn.FieldType(r2_act,  16*[r2_act.regular_repr])
     self.feat_type_out  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
-    self.escnn1 = module(in_type=self.feat_type_in, 
-                          out_type=self.feat_type_hidden, 
+
+    self.linear = module(in_type=self.feat_type_in, 
+                          out_type=self.feat_type_linear, 
+                          kernel_size=1 ,stride=1,
+                          key=key, name='linear')
+    self.equiv_relu0 = nn.ReLU(self.feat_type_linear)
+    self.escnn1 = module(in_type=self.feat_type_hidden1, 
+                          out_type=self.feat_type_hidden1, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=key, name='s1conv')
-    self.escnn2 = module(in_type=self.feat_type_hidden, 
-                          out_type=self.feat_type_hidden, 
+    self.equiv_relu1 = nn.ReLU(self.feat_type_hidden1)
+    self.escnn2 = module(in_type=self.feat_type_hidden1, 
+                          out_type=self.feat_type_hidden2, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=key, name='s2conv')
-    self.escnn3 = module(in_type=self.feat_type_hidden, 
-                          out_type=self.feat_type_hidden, 
+    self.equiv_relu2 = nn.ReLU(self.feat_type_hidden2)
+    self.escnn3 = module(in_type=self.feat_type_hidden2, 
+                          out_type=self.feat_type_hidden3, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=key, name='s3conv')
-    self.escnn4 = module(in_type=self.feat_type_hidden, 
-                          out_type=self.feat_type_hidden, 
+    self.equiv_relu3 = nn.ReLU(self.feat_type_hidden3)
+    self.escnn4 = module(in_type=self.feat_type_hidden3, 
+                          out_type=self.feat_type_hidden4, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=key, name='s4conv')
-    self.escnn5 = module(in_type=self.feat_type_hidden, 
-                          out_type=self.feat_type_hidden, 
-                          kernel_size=3 ,stride=1, padding=1, 
-                          key=key, name='s5conv')
-    self.escnn6 = module(in_type=self.feat_type_hidden, 
+    self.equiv_relu4 = nn.ReLU(self.feat_type_hidden4)
+    self.escnn5 = module(in_type=self.feat_type_hidden4, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=1, padding=1, 
-                          key=key, name='s6onv')
-    self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+                          key=key, name='s5conv')
     self.key=key
+    self._depth = 128
+    self._minres = 4
+    breaks = list(jnp.arange(0.0, self._depth * self._minres * self._minres, self._depth))[1:]
+    self._breaks = tuple(jax.tree.map(lambda x: int(x.item()), breaks))
 
   def __call__(self, x):
     x = x[:,:,jnp.newaxis, jnp.newaxis]
-    x = jnp.repeat(jnp.repeat(x, 2, -1), 2, -2)
+    
     x = nn.GeometricTensor(x, self.feat_type_in)
+    x = self.linear(x)
+    x = self.equiv_relu0(x)
+    #TODO: find a better way to do this
+    y = x.split(list(self._breaks))
+    y = jax.tree.map(lambda x: x.tensor, y)
+    y = jnp.concatenate(y,-1)
+    y = jnp.reshape(y, [x.shape[0], self._depth*2, self._minres, self._minres])
+    
+    x = nn.GeometricTensor(y, self.feat_type_hidden1)
     x = self.escnn1(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm1', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
-    x = self.equiv_relu(x)
+    x = nn.GeometricTensor(x, self.feat_type_hidden1)
+    x = self.equiv_relu1(x)
     x = self.escnn2(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm2', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
-    x = self.equiv_relu(x)
+    x = nn.GeometricTensor(x, self.feat_type_hidden2)
+    x = self.equiv_relu2(x)
     x = self.escnn3(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm3', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
-    x = self.equiv_relu(x)
+    x = nn.GeometricTensor(x, self.feat_type_hidden3)
+    x = self.equiv_relu3(x)
     x = self.escnn4(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm4', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
-    x = self.equiv_relu(x)
+    x = nn.GeometricTensor(x, self.feat_type_hidden4)
+    x = self.equiv_relu4(x)
     x = self.escnn5(x)
-    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
-    x = self.get('norm5', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
-    x = self.equiv_relu(x)
-    x = self.escnn6(x)
     x = jaxutils.cast_to_compute(x.tensor) + 0.5
     x = jnp.moveaxis(x,1,-1)
     return x
