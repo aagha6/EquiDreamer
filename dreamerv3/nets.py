@@ -816,7 +816,6 @@ class EquivtMLP(MLP):
       r2_act = gspaces.flip2dOnR2()    
       self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  512*[r2_act.regular_repr])
-      self.feat_type_out  = nn.FieldType(r2_act,  1*[r2_act.trivial_repr])
       self.escnn1 = conv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=key, name='s1conv')
@@ -833,6 +832,7 @@ class EquivtMLP(MLP):
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=key, name='s5conv')
       self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
+      self.equiv_relu = nn.ReLU(self.feat_type_hidden)
 
   def __call__(self, inputs):
     feat = self._inputs(inputs)
@@ -845,10 +845,15 @@ class EquivtMLP(MLP):
     assert len(x.shape)==4
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
+    x = self.equiv_relu(x)
     x = self.escnn2(x)
+    x = self.equiv_relu(x)
     x = self.escnn3(x)
+    x = self.equiv_relu(x)
     x = self.escnn4(x)
+    x = self.equiv_relu(x)
     x = self.escnn5(x)
+    x = self.equiv_relu(x)
     x = self.group_pooling(x).tensor.mean(-1).mean(-1)
     
     x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
