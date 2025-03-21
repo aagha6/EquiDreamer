@@ -123,22 +123,27 @@ class WorldModel(nj.Module):
     self.config = config
     shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
-    self.encoder = nets.MultiEncoder(shapes, key, **config.encoder, name='enc')
-    self.rssm = nets.RSSM(key, **config.rssm, name='rssm')
+    rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
+    self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, name='enc')
+    self.rssm = nets.RSSM(rssm_key, **config.rssm, name='rssm')
     self.heads = {
-        'decoder': nets.MultiDecoder(shapes, key, deter=config.rssm['deter'], 
+        'decoder': nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'], **config.decoder, 
                                      name='dec')}
-    if config.rssm['equiv']:
-      self.heads['reward'] = nets.EquivtMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'], key=key,
+    if config.reward_head['equiv']:
+      self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
+                                     stoch=config.rssm['stoch'], key=reward_key,
                                      **config.reward_head, name='rew')
-      self.heads['cont'] = nets.EquivtMLP((), deter=config.rssm['deter'], 
-                                      stoch=config.rssm['stoch'], key=key,
-                                      **config.cont_head, name='cont')
     else:
       self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
+
+    if config.cont_head['equiv']:
+      self.heads['cont'] = nets.EquivMLP((), deter=config.rssm['deter'], 
+                                      stoch=config.rssm['stoch'], key=cont_key,
+                                      **config.cont_head, name='cont')
+    else:
       self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
+
     self.opt = jaxutils.Optimizer(name='model_opt', **config.model_opt)
     scales = self.config.loss_scales.copy()
     image, vector = scales.pop('image'), scales.pop('vector')

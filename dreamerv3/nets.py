@@ -33,14 +33,13 @@ class RSSM(nj.Module):
     self.conv_gru = conv_gru
     self._kw = kw
 
-    self.key = key
     self._equiv=equiv
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
-      self.init_equiv_nets()
+      self.init_equiv_nets(key)
 
-  def init_equiv_nets(self):
+  def init_equiv_nets(self, key):
     self._r2_act = gspaces.flip2dOnR2()
     self._field_type_stoch  = nn.FieldType(self._r2_act, self._stoch *
                                                 [self._r2_act.regular_repr])
@@ -60,29 +59,29 @@ class RSSM(nj.Module):
     #TODO: need to clean this up
     self._field_type_inf_in  = nn.FieldType(self._r2_act, 
                                             (self._deter+ 32) * [self._r2_act.regular_repr])
-
+    stoch_key, act_key, img_out_key, obs_out_key, stoch_mean_key, stoch_std, gru_key = jax.random.split(key, 7)
     self.init_stoch_embed = nn.R2Conv(in_type=self._field_type_stoch,
                                       out_type=self._field_type_embed,
-                                      kernel_size=1, key=self.key)
+                                      kernel_size=1, key=stoch_key)
     self.init_act_embed = nn.R2Conv(in_type=self._field_type_act,
                                     out_type=self._field_type_embed,
-                                    kernel_size=1, key=self.key)
+                                    kernel_size=1, key=act_key)
     self.init_img_out = nn.R2Conv(in_type=self._field_type_deter,
                                   out_type=self._field_type_embed,
-                                  kernel_size=1, key=self.key)
+                                  kernel_size=1, key=img_out_key)
     self.init_obs_out = nn.R2Conv(in_type=self._field_type_inf_in,
                                   out_type=self._field_type_embed,
-                                  kernel_size=1,key=self.key)
+                                  kernel_size=1,key=obs_out_key)
     self.init_stoch_mean = nn.R2Conv(in_type=self._field_type_embed,
                                     out_type=self._field_type_stoch,
-                                    kernel_size=1, key=self.key)
+                                    kernel_size=1, key=stoch_mean_key)
     self.init_stoch_std = nn.R2Conv(in_type=self._field_type_embed,
                                     out_type=self._field_type_std,
-                                    kernel_size=1, key=self.key)
+                                    kernel_size=1, key=stoch_std)
     gru_kw = {"in_type":self._field_type_gru_in,
               "out_type":self._field_type_deter, 
               "kernel_size":1, 'stride':1, 
-              'key':self.key}    
+              'key':gru_key}    
     self.init_reset = nn.R2Conv(**gru_kw)
     self.init_update = nn.R2Conv(**gru_kw)
     self.init_cand = nn.R2Conv(**gru_kw)
@@ -392,8 +391,6 @@ class MultiEncoder(nj.Module):
       self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
     elif cnn == 'equiv':
       self._cnn = EquivImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
-    else:
-      self._cnn = ImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
     if self.mlp_shapes:
       self._mlp = MLP(None, mlp_layers, mlp_units, dist='none', **mlp_kw)
 
@@ -533,55 +530,9 @@ class ImageEncoderResnet(nj.Module):
     # print(x.shape)
     return x
 
-class ImageEncoder(nj.Module):
-
-  def __init__(self, depth, blocks, resize, minres,key, **kw):
-    self._depth = depth
-    self._blocks = blocks
-    self._resize = resize
-    self._minres = minres
-    self._kw = kw
-    self.module = functools.partial(nj.EquinoxModule, eqx.nn.Conv2d)
-    self._norm1 = Norm('layer', name='norm1')
-    self._norm2 = Norm('layer', name='norm2')
-    self._norm3 = Norm('layer', name='norm3')
-    self._norm4 = Norm('layer', name='norm4')    
-    self.key=key
-
-  def __call__(self, x):
-    x = jaxutils.cast_to_compute(x) - 0.5
-    x = jnp.moveaxis(x,-1,1)
-    x = jax.vmap(self.get(f's1conv', self.module, 
-                          in_channels=3, out_channels=32, 
-                          kernel_size=4 ,stride=2, 
-                          dtype=jnp.float32, key=self.key))(x)
-    x = self._norm1(x)
-    x = jax.nn.elu(x)
-    x = jax.vmap(self.get(f's2conv', self.module, 
-                          in_channels=32, out_channels=32, 
-                          kernel_size=4 ,stride=2, 
-                          dtype=jnp.float32, key=self.key))(x)
-    x = self._norm2(x)
-    x = jax.nn.elu(x)
-    x = jax.vmap(self.get(f's3conv', self.module, 
-                          in_channels=32, out_channels=32, 
-                          kernel_size=4 ,stride=2, 
-                          dtype=jnp.float32, key=self.key))(x)
-    x = self._norm3(x)
-    x = jax.nn.elu(x)
-    x = jax.vmap(self.get(f's4conv', self.module, 
-                          in_channels=32, out_channels=32, 
-                          kernel_size=4 ,stride=2, 
-                          dtype=jnp.float32, key=self.key))(x)
-    x = self._norm4(x)
-    x = jax.nn.elu(x)
-
-    x = x.reshape((x.shape[0], -1))
-    return x
-
 class EquivImageEncoder(nj.Module):
 
-  def __init__(self, depth, blocks, resize, minres,key, **kw):
+  def __init__(self, depth, blocks, resize, minres, key, **kw):
     self._depth = depth
     self._blocks = blocks
     self._resize = resize
@@ -591,32 +542,32 @@ class EquivImageEncoder(nj.Module):
     r2_act = gspaces.flip2dOnR2()    
     self.feat_type_in  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
     self.feat_type_out  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
+    keys = jax.random.split(key, 6)
     self.escnn1 = self.module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1,
-                          key=key, name='s1conv')
+                          key=keys[0], name='s1conv')
     self.escnn2 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1,
-                          key=key, name='s2conv')
+                          key=keys[1], name='s2conv')
     self.escnn3 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1, 
-                          key=key, name='s3conv')
+                          key=keys[2], name='s3conv')
     self.escnn4 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1, 
-                          key=key, name='s4conv')
+                          key=keys[3], name='s4conv')
     self.escnn5 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1, 
-                          key=key, name='s5conv')
+                          key=keys[4], name='s5conv')
     self.escnn6 = self.module(in_type=self.feat_type_out, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=2, padding=1,
-                          key=key, name='s6conv')
+                          key=keys[5], name='s6conv')
     self.equiv_relu = nn.ReLU(self.feat_type_out)
-    self.key=key
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
@@ -651,36 +602,36 @@ class EquivImageDecoder(nj.Module):
     self.feat_type_hidden4  = nn.FieldType(r2_act,  16*[r2_act.regular_repr])
     self.feat_type_out  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
 
+    keys = jax.random.split(key, 6)
     self.linear = module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_linear, 
                           kernel_size=1 ,stride=1,
-                          key=key, name='linear')
+                          key=keys[0], name='linear')
     self.equiv_relu0 = nn.ReLU(self.feat_type_linear)
     self.escnn1 = module(in_type=self.feat_type_hidden1, 
                           out_type=self.feat_type_hidden1, 
                           kernel_size=3 ,stride=1, padding=1,
-                          key=key, name='s1conv')
+                          key=keys[1], name='s1conv')
     self.equiv_relu1 = nn.ReLU(self.feat_type_hidden1)
     self.escnn2 = module(in_type=self.feat_type_hidden1, 
                           out_type=self.feat_type_hidden2, 
                           kernel_size=3 ,stride=1, padding=1,
-                          key=key, name='s2conv')
+                          key=keys[2], name='s2conv')
     self.equiv_relu2 = nn.ReLU(self.feat_type_hidden2)
     self.escnn3 = module(in_type=self.feat_type_hidden2, 
                           out_type=self.feat_type_hidden3, 
                           kernel_size=3 ,stride=1, padding=1, 
-                          key=key, name='s3conv')
+                          key=keys[3], name='s3conv')
     self.equiv_relu3 = nn.ReLU(self.feat_type_hidden3)
     self.escnn4 = module(in_type=self.feat_type_hidden3, 
                           out_type=self.feat_type_hidden4, 
                           kernel_size=3 ,stride=1, padding=1, 
-                          key=key, name='s4conv')
+                          key=keys[4], name='s4conv')
     self.equiv_relu4 = nn.ReLU(self.feat_type_hidden4)
     self.escnn5 = module(in_type=self.feat_type_hidden4, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=1, padding=1, 
-                          key=key, name='s5conv')
-    self.key=key
+                          key=keys[5], name='s5conv')
     self._depth = 128
     self._minres = 4
     breaks = list(jnp.arange(0.0, self._depth * self._minres * self._minres, self._depth))[1:]
@@ -818,7 +769,7 @@ class MLP(nj.Module):
     return self.get(f'dist_{name}', Dist, shape, **self._dist)(x)
 
 
-class EquivtMLP(MLP):
+class EquivMLP(MLP):
 
   def __init__(
       self, shape, layers, units, deter, stoch, key, inputs=['tensor'], dims=None,
@@ -833,21 +784,22 @@ class EquivtMLP(MLP):
       r2_act = gspaces.flip2dOnR2()    
       self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  512*[r2_act.regular_repr])
+      keys = jax.random.split(key, 5)
       self.escnn1 = conv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=key, name='s1conv')
+                            kernel_size=1, key=keys[0], name='s1conv')
       self.escnn2 = conv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=key, name='s2conv')
+                            kernel_size=1, key=keys[1], name='s2conv')
       self.escnn3 = conv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=key, name='s3conv')
+                            kernel_size=1, key=keys[2], name='s3conv')
       self.escnn4 = conv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=key, name='s4conv')
+                            kernel_size=1, key=keys[3], name='s4conv')
       self.escnn5 = conv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=key, name='s5conv')
+                            kernel_size=1, key=keys[4], name='s5conv')
       self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
       self.equiv_relu = nn.ReLU(self.feat_type_hidden)
 
