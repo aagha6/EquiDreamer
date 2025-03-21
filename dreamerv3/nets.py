@@ -533,58 +533,63 @@ class ImageEncoderResnet(nj.Module):
 class EquivImageEncoder(nj.Module):
 
   def __init__(self, depth, blocks, resize, minres, key, **kw):
-    self._depth = depth
-    self._blocks = blocks
-    self._resize = resize
-    self._minres = minres
-    self._kw = kw
+    depth = depth // 2
     self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
     r2_act = gspaces.flip2dOnR2()    
     self.feat_type_in  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
-    self.feat_type_out  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
+    self.feat_type_out1  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    depth *= 2
+    self.feat_type_out2  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    depth *= 2
+    self.feat_type_out3  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    depth *= 2
+    self.feat_type_out4  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    depth *= 2
+    self.feat_type_out5  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    depth *= 6
+    self.feat_type_out5  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+
     keys = jax.random.split(key, 6)
     self.escnn1 = self.module(in_type=self.feat_type_in, 
-                          out_type=self.feat_type_out, 
-                          kernel_size=3 ,stride=2, padding=1,
+                          out_type=self.feat_type_out1, 
+                          kernel_size=4 ,stride=2,
                           key=keys[0], name='s1conv')
-    self.escnn2 = self.module(in_type=self.feat_type_out, 
-                          out_type=self.feat_type_out, 
-                          kernel_size=3 ,stride=2, padding=1,
+    self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
+    self.escnn2 = self.module(in_type=self.feat_type_out1, 
+                          out_type=self.feat_type_out2, 
+                          kernel_size=4 ,stride=2,
                           key=keys[1], name='s2conv')
-    self.escnn3 = self.module(in_type=self.feat_type_out, 
-                          out_type=self.feat_type_out, 
-                          kernel_size=3 ,stride=2, padding=1, 
+    self.equiv_relu2 = nn.ReLU(self.feat_type_out2)
+    self.escnn3 = self.module(in_type=self.feat_type_out2, 
+                          out_type=self.feat_type_out3, 
+                          kernel_size=4 ,stride=2,
                           key=keys[2], name='s3conv')
-    self.escnn4 = self.module(in_type=self.feat_type_out, 
-                          out_type=self.feat_type_out, 
-                          kernel_size=3 ,stride=2, padding=1, 
-                          key=keys[3], name='s4conv')
-    self.escnn5 = self.module(in_type=self.feat_type_out, 
-                          out_type=self.feat_type_out, 
-                          kernel_size=3 ,stride=2, padding=1, 
-                          key=keys[4], name='s5conv')
-    self.escnn6 = self.module(in_type=self.feat_type_out, 
-                          out_type=self.feat_type_out, 
+    self.equiv_relu3 = nn.ReLU(self.feat_type_out3)
+    self.escnn4 = self.module(in_type=self.feat_type_out3, 
+                          out_type=self.feat_type_out4,
                           kernel_size=3 ,stride=2, padding=1,
-                          key=keys[5], name='s6conv')
-    self.equiv_relu = nn.ReLU(self.feat_type_out)
+                          key=keys[3], name='s4conv')
+    self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
+    self.escnn5 = self.module(in_type=self.feat_type_out4, 
+                          out_type=self.feat_type_out5, 
+                          kernel_size=3 ,stride=2,
+                          key=keys[4], name='s5conv')
+    self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
     x = jnp.moveaxis(x,-1,1)
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_relu1(x)
     x = self.escnn2(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_relu2(x)
     x = self.escnn3(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_relu3(x)
     x = self.escnn4(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_relu4(x)
     x = self.escnn5(x)
-    x = self.equiv_relu(x)
-    x = self.escnn6(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_relu5(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
     return x
@@ -744,8 +749,8 @@ class MLP(nj.Module):
     self._symlog_inputs = symlog_inputs
     distkeys = (
         'dist', 'outscale', 'minstd', 'maxstd', 'outnorm', 'unimix', 'bins')
-    self._dense = {k: v for k, v in kw.items() if k not in distkeys}
-    self._dist = {k: v for k, v in kw.items() if k in distkeys}
+    self._dense = {k: v for k, v in kw.items() if k not in distkeys and k != 'equiv'}
+    self._dist = {k: v for k, v in kw.items() if k in distkeys and k != 'equiv'}
 
   def __call__(self, inputs):
     feat = self._inputs(inputs)
