@@ -41,31 +41,35 @@ class RSSM(nj.Module):
 
   def init_equiv_nets(self, key):
     self._r2_act = gspaces.flip2dOnR2()
-    self._field_type_stoch  = nn.FieldType(self._r2_act, self._stoch *
+    stoch = self._stoch //2
+    deter = self._deter // 2
+    units = self._kw['units'] // 2
+    self._field_type_stoch  = nn.FieldType(self._r2_act, stoch *
                                                 [self._r2_act.regular_repr])
     #TODO:try equiv std
     self._field_type_std  = nn.FieldType(self._r2_act,
-                                               self._stoch * [self._r2_act.trivial_repr])
+                                               stoch * [self._r2_act.trivial_repr])
     self._field_type_deter  = nn.FieldType(self._r2_act,
-                                         self._deter * [self._r2_act.regular_repr])
+                                         deter * [self._r2_act.regular_repr])
     #TODO: will need to adapt
     #TODO: is this correct for cpole ?
     self._field_type_act  = nn.FieldType(self._r2_act,
                                                1 * [self._r2_act.trivial_repr])
     self._field_type_embed  = nn.FieldType(self._r2_act,
-                                               self._kw['units'] * [self._r2_act.regular_repr])
+                                               units * [self._r2_act.regular_repr])
     self._field_type_gru_in  = nn.FieldType(self._r2_act, 
-                                            (self._deter+ 2 * self._kw['units']) * [self._r2_act.regular_repr])
-    #TODO: need to clean this up
+                                            (deter + units) * [self._r2_act.regular_repr])
+    self._field_type_img_in  = nn.FieldType(self._r2_act, 
+                                            stoch * [self._r2_act.regular_repr] + 1 * [self._r2_act.trivial_repr])
+                                            
+    #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(self._r2_act, 
-                                            (self._deter+ 32) * [self._r2_act.regular_repr])
-    stoch_key, act_key, img_out_key, obs_out_key, stoch_mean_key, stoch_std, gru_key = jax.random.split(key, 7)
-    self.init_stoch_embed = nn.R2Conv(in_type=self._field_type_stoch,
-                                      out_type=self._field_type_embed,
-                                      kernel_size=1, key=stoch_key)
-    self.init_act_embed = nn.R2Conv(in_type=self._field_type_act,
+                                            (deter + 3072 // 2) * [self._r2_act.regular_repr])
+    
+    img_in_key, img_out_key, obs_out_key, stoch_mean_key, stoch_std, gru_key = jax.random.split(key, 6)
+    self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
                                     out_type=self._field_type_embed,
-                                    kernel_size=1, key=act_key)
+                                    kernel_size=1, key=img_in_key)
     self.init_img_out = nn.R2Conv(in_type=self._field_type_deter,
                                   out_type=self._field_type_embed,
                                   kernel_size=1, key=img_out_key)
@@ -99,10 +103,10 @@ class RSSM(nj.Module):
       if self._equiv:
         #TODO:extend to other types of equivariance
         state = dict(
-          mean=jnp.zeros([bs, self._stoch * 2], f32),
-          std=jnp.ones([bs, self._stoch * 2], f32),
-          stoch=jnp.zeros([bs, self._stoch * 2], f32),
-          deter=jnp.zeros([bs, self._deter * 2], f32))
+          mean=jnp.zeros([bs, self._stoch], f32),
+          std=jnp.ones([bs, self._stoch], f32),
+          stoch=jnp.zeros([bs, self._stoch], f32),
+          deter=jnp.zeros([bs, self._deter], f32))
       else:
         state = dict(
           mean=jnp.zeros([bs, self._stoch], f32),
@@ -190,25 +194,16 @@ class RSSM(nj.Module):
     if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
       prev_action = prev_action.reshape(shape)
+    x = jnp.concatenate([prev_stoch, prev_action], -1)
     if self._equiv:
-      stoch_embed = self.get('stoch_img_in', 
-                            EquivLinear, 
-                            **{"net":self.init_stoch_embed, 
-                              'in_type':self._field_type_stoch,
-                              'out_type':self._field_type_embed,
-                              'norm':self._kw['norm'],
-                              'act':'equiv_relu'})(prev_stoch)
-      act_embed = self.get('action_img_in', 
-                          EquivLinear, 
-                            **{"net":self.init_act_embed, 
-                              'in_type':self._field_type_act,
-                              'out_type':self._field_type_embed,
-                              'norm':self._kw['norm'],
-                              'act':'equiv_relu'})(prev_action)
-      #TODO is this equivariant ?
-      x = jnp.concatenate([stoch_embed, act_embed], 1)
+      x = self.get('img_in', 
+                    EquivLinear, 
+                    **{"net":self.init_img_in, 
+                      'in_type':self._field_type_img_in,
+                      'out_type':self._field_type_embed,
+                      'norm':self._kw['norm'],
+                      'act':'equiv_relu'})(x)
     else:
-      x = jnp.concatenate([prev_stoch, prev_action], -1)
       x = self.get('img_in', Linear, **self._kw)(x)
     if self.conv_gru:
       x, deter = self._conv_gru(x, prev_state['deter'])
