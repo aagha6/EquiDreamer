@@ -59,6 +59,8 @@ class RSSM(nj.Module):
                                                units * [self._r2_act.regular_repr])
     self._field_type_gru_in  = nn.FieldType(self._r2_act, 
                                             (deter + units) * [self._r2_act.regular_repr])
+    self._field_type_gru_out  = nn.FieldType(self._r2_act, 
+                                            3 * deter * [self._r2_act.regular_repr])
     self._field_type_img_in  = nn.FieldType(self._r2_act, 
                                             stoch * [self._r2_act.regular_repr] + 1 * [self._r2_act.trivial_repr])
                                             
@@ -83,12 +85,12 @@ class RSSM(nj.Module):
                                     out_type=self._field_type_std,
                                     kernel_size=1, key=stoch_std)
     gru_kw = {"in_type":self._field_type_gru_in,
-              "out_type":self._field_type_deter, 
+              "out_type":self._field_type_gru_out, 
               "kernel_size":1, 'stride':1, 
               'key':gru_key}    
-    self.init_reset = nn.R2Conv(**gru_kw)
-    self.init_update = nn.R2Conv(**gru_kw)
-    self.init_cand = nn.R2Conv(**gru_kw)
+    self.init_gru_cell = nn.R2Conv(**gru_kw)
+    breaks = list(jnp.arange(0.0, deter * 3, deter))[1:]
+    self._gru_breaks = jax.tree.map(lambda x: int(x.item()), breaks)
 
   def initial(self, bs):
     if self._classes:
@@ -259,28 +261,17 @@ class RSSM(nj.Module):
 
   def _equiv_gru(self, x, deter):
     x = jnp.concatenate([x, deter], 1) # TODO: is this equiv?
-    #TODO:is it possible to use only one and then .split() ?
-    reset = self.get('gru_reset',
-                      EquivLinear,
-                      **{"net":self.init_reset,
+    gru_out = self.get('gru',
+                      EquivGRUCell,
+                      **{"net":self.init_gru_cell,
                       'in_type':self._field_type_gru_in,
-                      'out_type':self._field_type_deter,
+                      'out_type':self._field_type_gru_out,
                       'norm':self._kw['norm'],
                       'act':'none'})(x)
-    cand = self.get('gru_cand',
-                    EquivLinear,
-                    **{"net":self.init_cand,
-                    'in_type':self._field_type_gru_in,
-                    'out_type':self._field_type_deter,
-                    'norm':self._kw['norm'],
-                    'act':'none'})(x)
-    update = self.get('gru_update',
-                    EquivLinear,
-                    **{"net":self.init_update,
-                    'in_type':self._field_type_gru_in,
-                    'out_type':self._field_type_deter,
-                    'norm':self._kw['norm'],
-                    'act':'none'})(x)
+    reset, cand, update = gru_out.split(list(self._gru_breaks))
+    reset = reset.tensor.mean(-1).mean(-1)
+    cand = cand.tensor.mean(-1).mean(-1)
+    update = update.tensor.mean(-1).mean(-1)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
     update = jax.nn.sigmoid(update - 1)
@@ -1018,6 +1009,18 @@ class EquivLinear(nj.Module):
     x = self._act(x).tensor.mean(-1).mean(-1)
     return x
 
+
+class EquivGRUCell(EquivLinear):
+
+  def __call__(self, x):
+    x = x[:, :, jnp.newaxis, jnp.newaxis]
+    assert len(x.shape)==4
+    x = nn.GeometricTensor(x, self._in_type)
+    x = self._ecnn(x)
+    x = self.get('norm', Norm, self._norm)(x.tensor.mean(-1).mean(-1))
+    x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._out_type)
+    return x
+  
 class Norm(nj.Module):
 
   def __init__(self, impl):
