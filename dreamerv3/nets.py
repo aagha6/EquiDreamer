@@ -44,11 +44,8 @@ class RSSM(nj.Module):
     stoch = self._stoch //2
     deter = self._deter // 2
     units = self._kw['units'] // 2
-    self._field_type_stoch  = nn.FieldType(self._r2_act, stoch *
+    self._field_type_stoch  = nn.FieldType(self._r2_act, stoch * 2 *
                                                 [self._r2_act.regular_repr])
-    #TODO:try equiv std
-    self._field_type_std  = nn.FieldType(self._r2_act,
-                                               stoch * [self._r2_act.trivial_repr])
     self._field_type_deter  = nn.FieldType(self._r2_act,
                                          deter * [self._r2_act.regular_repr])
     #TODO: will need to adapt
@@ -81,9 +78,6 @@ class RSSM(nj.Module):
     self.init_stoch_mean = nn.R2Conv(in_type=self._field_type_embed,
                                     out_type=self._field_type_stoch,
                                     kernel_size=1, key=stoch_mean_key)
-    self.init_stoch_std = nn.R2Conv(in_type=self._field_type_embed,
-                                    out_type=self._field_type_std,
-                                    kernel_size=1, key=stoch_std)
     gru_kw = {"in_type":self._field_type_gru_in,
               "out_type":self._field_type_gru_out, 
               "kernel_size":1, 'stride':1, 
@@ -91,6 +85,8 @@ class RSSM(nj.Module):
     self.init_gru_cell = nn.R2Conv(**gru_kw)
     breaks = list(jnp.arange(0.0, deter * 3, deter))[1:]
     self._gru_breaks = jax.tree.map(lambda x: int(x.item()), breaks)
+    breaks = list(jnp.arange(0.0, stoch * 2, stoch))[1:]
+    self._stoch_breaks = jax.tree.map(lambda x: int(x.item()), breaks)
 
   def initial(self, bs):
     if self._classes:
@@ -302,21 +298,15 @@ class RSSM(nj.Module):
       return stats
     else:
       if self._equiv:
-        mean = self.get(f'{name}_mean', 
-                          EquivLinear, 
-                          **{"net":self.init_stoch_mean, 
-                            'in_type':self._field_type_embed,
-                            'out_type':self._field_type_stoch,
-                            'act':'none'})(x)
-        std = self.get(f'{name}_std', 
-                          EquivLinear,
-                          **{"net":self.init_stoch_std, 
-                            'in_type':self._field_type_embed,
-                            'out_type':self._field_type_std,
-                            'act':'none'})(x)
-        #TODO:more generic
-        #TODO:is invariance done correctly here ?
-        std=std.repeat(2,-1)        
+        x = self.get(f'{name}', 
+                      EquivGRUCell, 
+                      **{"net":self.init_stoch_mean, 
+                        'in_type':self._field_type_embed,
+                        'out_type':self._field_type_stoch,
+                        'act':'none'})(x)
+        mean, std = x.split(list(self._stoch_breaks))
+        mean = mean.tensor.mean(-1).mean(-1)
+        std = std.tensor.mean(-1).mean(-1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
