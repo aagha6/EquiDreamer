@@ -556,26 +556,17 @@ class EquivImageEncoder(nj.Module):
     x = jaxutils.cast_to_compute(x) - 0.5
     x = jnp.moveaxis(x,-1,1)
     x = nn.GeometricTensor(x, self.feat_type_in)
-    x = self.escnn1(x).tensor
-    x = self.get('norm1', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_out1)
+    x = self.escnn1(x)
     x = self.equiv_relu1(x)
-    x = self.escnn2(x).tensor
-    x = self.get('norm2', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_out2)
+    x = self.escnn2(x)
     x = self.equiv_relu2(x)
-    x = self.escnn3(x).tensor
-    x = self.get('norm3', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_out3)
+    x = self.escnn3(x)
     x = self.equiv_relu3(x)
-    x = self.escnn4(x).tensor
-    x = self.get('norm4', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_out4)
+    x = self.escnn4(x)
     x = self.equiv_relu4(x)
-    x = self.escnn5(x).tensor
-    x = self.get('norm5', Norm, 'escnn_layer')(x)
-    x = nn.GeometricTensor(x, self.feat_type_out5)
-    x = self.equiv_relu5(x).tensor
+    x = self.escnn5(x)
+    x = self.equiv_relu5(x)
+    x = x.tensor
     x = x.reshape((x.shape[0], -1))
     return x
   
