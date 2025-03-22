@@ -530,27 +530,27 @@ class EquivImageEncoder(nj.Module):
                           out_type=self.feat_type_out1, 
                           kernel_size=4 ,stride=2,
                           key=keys[0], name='s1conv')
-    self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
+    self.equiv_relu1 = nn.ELU(self.feat_type_out1)
     self.escnn2 = self.module(in_type=self.feat_type_out1, 
                           out_type=self.feat_type_out2, 
                           kernel_size=4 ,stride=2,
                           key=keys[1], name='s2conv')
-    self.equiv_relu2 = nn.ReLU(self.feat_type_out2)
+    self.equiv_relu2 = nn.ELU(self.feat_type_out2)
     self.escnn3 = self.module(in_type=self.feat_type_out2, 
                           out_type=self.feat_type_out3, 
                           kernel_size=4 ,stride=2,
                           key=keys[2], name='s3conv')
-    self.equiv_relu3 = nn.ReLU(self.feat_type_out3)
+    self.equiv_relu3 = nn.ELU(self.feat_type_out3)
     self.escnn4 = self.module(in_type=self.feat_type_out3, 
                           out_type=self.feat_type_out4,
                           kernel_size=3 ,stride=2, padding=1,
                           key=keys[3], name='s4conv')
-    self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
+    self.equiv_relu4 = nn.ELU(self.feat_type_out4)
     self.escnn5 = self.module(in_type=self.feat_type_out4, 
                           out_type=self.feat_type_out5, 
                           kernel_size=3 ,stride=2,
                           key=keys[4], name='s5conv')
-    self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
+    self.equiv_relu5 = nn.ELU(self.feat_type_out5)
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
@@ -597,27 +597,27 @@ class EquivImageDecoder(nj.Module):
                           out_type=self.feat_type_linear, 
                           kernel_size=1 ,stride=1,
                           key=keys[0], name='linear')
-    self.equiv_relu0 = nn.ReLU(self.feat_type_linear)
+    self.equiv_relu0 = nn.ELU(self.feat_type_linear)
     self.escnn1 = module(in_type=self.feat_type_hidden1, 
                           out_type=self.feat_type_hidden1, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=keys[1], name='s1conv')
-    self.equiv_relu1 = nn.ReLU(self.feat_type_hidden1)
+    self.equiv_relu1 = nn.ELU(self.feat_type_hidden1)
     self.escnn2 = module(in_type=self.feat_type_hidden1, 
                           out_type=self.feat_type_hidden2, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=keys[2], name='s2conv')
-    self.equiv_relu2 = nn.ReLU(self.feat_type_hidden2)
+    self.equiv_relu2 = nn.ELU(self.feat_type_hidden2)
     self.escnn3 = module(in_type=self.feat_type_hidden2, 
                           out_type=self.feat_type_hidden3, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[3], name='s3conv')
-    self.equiv_relu3 = nn.ReLU(self.feat_type_hidden3)
+    self.equiv_relu3 = nn.ELU(self.feat_type_hidden3)
     self.escnn4 = module(in_type=self.feat_type_hidden3, 
                           out_type=self.feat_type_hidden4, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[4], name='s4conv')
-    self.equiv_relu4 = nn.ReLU(self.feat_type_hidden4)
+    self.equiv_relu4 = nn.ELU(self.feat_type_hidden4)
     self.escnn5 = module(in_type=self.feat_type_hidden4, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=1, padding=1, 
@@ -791,7 +791,7 @@ class EquivMLP(MLP):
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[4], name='s5conv')
       self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
-      self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+      self.equiv_relu = nn.ELU(self.feat_type_hidden)
 
   def __call__(self, inputs):
     feat = self._inputs(inputs)
@@ -1129,7 +1129,7 @@ def get_act(name, in_type=None):
     return lambda x: x
   elif name == 'equiv_relu':
     assert in_type is not None
-    return lambda x: nn.ReLU(in_type=in_type)(x)
+    return lambda x: nn.ELU(in_type=in_type)(x)
   elif name == 'mish':
     return lambda x: x * jnp.tanh(jax.nn.softplus(x))
   elif hasattr(jax.nn, name):
