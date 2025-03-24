@@ -21,7 +21,7 @@ eqx_conv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
 class RSSM(nj.Module):
 
   def __init__(
-      self, key, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, act_dim, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -32,38 +32,39 @@ class RSSM(nj.Module):
     self._action_clip = action_clip
     self.conv_gru = conv_gru
     self._kw = kw
+    self.act_dim = act_dim
 
     self._equiv=equiv
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
       self.init_equiv_nets(key)
+    self._gspace = gspaces.flip2dOnR2()
 
-  def init_equiv_nets(self, key):
-    self._r2_act = gspaces.flip2dOnR2()
-    stoch = self._stoch //2
+  def init_equiv_nets(self, key):    
+    stoch = self._stoch // 2
     deter = self._deter // 2
     units = self._kw['units'] // 2
-    self._field_type_stoch  = nn.FieldType(self._r2_act, stoch * 2 *
-                                                [self._r2_act.regular_repr])
-    self._field_type_deter  = nn.FieldType(self._r2_act,
-                                         deter * [self._r2_act.regular_repr])
+    self._field_type_stoch  = nn.FieldType(self._gspace, stoch * 2 *
+                                                [self._gspace.regular_repr])
+    self._field_type_deter  = nn.FieldType(self._gspace,
+                                         deter * [self._gspace.regular_repr])
     #TODO: will need to adapt
     #TODO: is this correct for cpole ?
-    self._field_type_act  = nn.FieldType(self._r2_act,
-                                               1 * [self._r2_act.trivial_repr])
-    self._field_type_embed  = nn.FieldType(self._r2_act,
-                                               units * [self._r2_act.regular_repr])
-    self._field_type_gru_in  = nn.FieldType(self._r2_act, 
-                                            (deter + units) * [self._r2_act.regular_repr])
-    self._field_type_gru_out  = nn.FieldType(self._r2_act, 
-                                            3 * deter * [self._r2_act.regular_repr])
-    self._field_type_img_in  = nn.FieldType(self._r2_act, 
-                                            stoch * [self._r2_act.regular_repr] + 1 * [self._r2_act.trivial_repr])
+    self._field_type_act  = nn.FieldType(self._gspace,
+                                               1 * [self._gspace.trivial_repr])
+    self._field_type_embed  = nn.FieldType(self._gspace,
+                                               units * [self._gspace.regular_repr])
+    self._field_type_gru_in  = nn.FieldType(self._gspace, 
+                                            (deter + units) * [self._gspace.regular_repr])
+    self._field_type_gru_out  = nn.FieldType(self._gspace, 
+                                            3 * deter * [self._gspace.regular_repr])
+    self._field_type_img_in  = nn.FieldType(self._gspace, 
+                                            stoch * [self._gspace.regular_repr] + 1 * [self._gspace.trivial_repr])
                                             
     #TODO: need to clean this up, deter+embed ?
-    self._field_type_inf_in  = nn.FieldType(self._r2_act, 
-                                            (deter + 3072 // 2) * [self._r2_act.regular_repr])
+    self._field_type_inf_in  = nn.FieldType(self._gspace, 
+                                            (deter + 3072 // 2) * [self._gspace.regular_repr])
     
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, stoch_std, gru_key = jax.random.split(key, 6)
     self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
