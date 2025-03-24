@@ -765,6 +765,9 @@ class EquivMLP(MLP):
       conv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
       pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
       r2_act = gspaces.flip2dOnR2()    
+      deter = deter // 2
+      stoch = stoch // 2
+
       self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  512*[r2_act.regular_repr])
       keys = jax.random.split(key, 5)
@@ -797,24 +800,14 @@ class EquivMLP(MLP):
     assert len(x.shape)==4
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
-    x = self.get('norm1', Norm, 'escnn_layer')(x.tensor)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
     x = self.equiv_relu(x)
     x = self.escnn2(x)
-    x = self.get('norm2', Norm, 'escnn_layer')(x.tensor)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
     x = self.equiv_relu(x)
     x = self.escnn3(x)
-    x = self.get('norm3', Norm, 'escnn_layer')(x.tensor)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
     x = self.equiv_relu(x)
     x = self.escnn4(x)
-    x = self.get('norm4', Norm, 'escnn_layer')(x.tensor)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
     x = self.equiv_relu(x)
     x = self.escnn5(x)
-    x = self.get('norm5', Norm, 'escnn_layer')(x.tensor)
-    x = nn.GeometricTensor(x, self.feat_type_hidden)
     x = self.equiv_relu(x)
     x = self.group_pooling(x).tensor.mean(-1).mean(-1)
     
