@@ -32,14 +32,14 @@ class RSSM(nj.Module):
     self._action_clip = action_clip
     self.conv_gru = conv_gru
     self._kw = kw
-    self.act_dim = act_dim
+    self._act_dim = act_dim
 
     self._equiv=equiv
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
+      self._gspace = gspaces.flip2dOnR2()
       self.init_equiv_nets(key)
-    self._gspace = gspaces.flip2dOnR2()
 
   def init_equiv_nets(self, key):    
     stoch = self._stoch // 2
@@ -49,18 +49,17 @@ class RSSM(nj.Module):
                                                 [self._gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(self._gspace,
                                          deter * [self._gspace.regular_repr])
-    #TODO: will need to adapt
-    #TODO: is this correct for cpole ?
-    self._field_type_act  = nn.FieldType(self._gspace,
-                                               1 * [self._gspace.trivial_repr])
     self._field_type_embed  = nn.FieldType(self._gspace,
                                                units * [self._gspace.regular_repr])
     self._field_type_gru_in  = nn.FieldType(self._gspace, 
                                             (deter + units) * [self._gspace.regular_repr])
     self._field_type_gru_out  = nn.FieldType(self._gspace, 
                                             3 * deter * [self._gspace.regular_repr])
+    #TODO: will need to adapt
+    #TODO: is this correct for cpole ?
+    #TODO: make action rep more generic
     self._field_type_img_in  = nn.FieldType(self._gspace, 
-                                            stoch * [self._gspace.regular_repr] + 1 * [self._gspace.trivial_repr])
+                                            (stoch + self._act_dim) * [self._gspace.regular_repr])
                                             
     #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(self._gspace, 
@@ -193,8 +192,9 @@ class RSSM(nj.Module):
     if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
       prev_action = prev_action.reshape(shape)
-    x = jnp.concatenate([prev_stoch, prev_action], -1)
     if self._equiv:
+      act = jnp.concatenate([prev_action, -prev_action], -1)
+      x = jnp.concatenate([prev_stoch, act], -1)
       x = self.get('img_in', 
                     EquivLinear, 
                     **{"net":self.init_img_in, 
@@ -203,6 +203,7 @@ class RSSM(nj.Module):
                       'norm':self._kw['norm'],
                       'act':'equiv_relu'})(x)
     else:
+      x = jnp.concatenate([prev_stoch, prev_action], -1)    
       x = self.get('img_in', Linear, **self._kw)(x)
     if self.conv_gru:
       x, deter = self._conv_gru(x, prev_state['deter'])
