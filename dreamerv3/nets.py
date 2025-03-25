@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import escnn_jax.nn as nn
-from escnn_jax import gspaces
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
 f32 = jnp.float32
@@ -21,7 +20,7 @@ eqx_conv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
 class RSSM(nj.Module):
 
   def __init__(
-      self, key, act_dim, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, act_dim, gspace, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -38,7 +37,7 @@ class RSSM(nj.Module):
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
-      self._gspace = gspaces.flip2dOnR2()
+      self._gspace = gspace
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
@@ -65,7 +64,7 @@ class RSSM(nj.Module):
     self._field_type_inf_in  = nn.FieldType(self._gspace, 
                                             (deter + 3072 // 2) * [self._gspace.regular_repr])
     
-    img_in_key, img_out_key, obs_out_key, stoch_mean_key, stoch_std, gru_key = jax.random.split(key, 6)
+    img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key = jax.random.split(key, 5)
     self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
                                     out_type=self._field_type_embed,
                                     kernel_size=1, key=img_in_key)
@@ -349,7 +348,7 @@ class RSSM(nj.Module):
 class MultiEncoder(nj.Module):
 
   def __init__(
-      self, shapes, key, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
+      self, shapes, key, gspace, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
       mlp_units=512, cnn='resize', cnn_depth=48,
       cnn_blocks=2, resize='stride',
       symlog_inputs=False, minres=4, **kw):
@@ -368,7 +367,7 @@ class MultiEncoder(nj.Module):
     if cnn == 'resnet':
       self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
     elif cnn == 'equiv':
-      self._cnn = EquivImageEncoder(cnn_depth, cnn_blocks, resize, key=key, **cnn_kw)
+      self._cnn = EquivImageEncoder(cnn_depth, gspace=gspace, key=key, **cnn_kw)
     if self.mlp_shapes:
       self._mlp = MLP(None, mlp_layers, mlp_units, dist='none', **mlp_kw)
 
@@ -399,7 +398,7 @@ class MultiEncoder(nj.Module):
 class MultiDecoder(nj.Module):
 
   def __init__(
-      self, shapes, key, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
+      self, shapes, key, gspace, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
       mlp_layers=4, mlp_units=512, cnn='resize', cnn_depth=48, cnn_blocks=2,
       image_dist='mse', vector_dist='mse', resize='stride', bins=255,
       outscale=1.0, minres=4, cnn_sigmoid=False, deter=None, stoch=None, **kw):
@@ -425,7 +424,8 @@ class MultiDecoder(nj.Module):
             shape, cnn_depth, cnn_blocks, resize, **cnn_kw, name='cnn')
       elif cnn=='equiv':
         assert (deter is not None and stoch is not None)
-        self._cnn = EquivImageDecoder(key=key, deter=deter // 2, stoch=stoch // 2, name='cnn')
+        self._cnn = EquivImageDecoder(key=key, gspace=gspace, 
+                                      deter=deter // 2, stoch=stoch // 2, **cnn_kw, name='cnn')
       else:
         raise NotImplementedError(cnn)
     if self.mlp_shapes:
@@ -510,22 +510,21 @@ class ImageEncoderResnet(nj.Module):
 
 class EquivImageEncoder(nj.Module):
 
-  def __init__(self, depth, blocks, resize, minres, key, **kw):
+  def __init__(self, depth, gspace, key, **kw):
     depth = depth // 2
     self.module = functools.partial(nj.ESCNNModule, nn.R2Conv)
-    r2_act = gspaces.flip2dOnR2()    
-    self.feat_type_in  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
-    self.feat_type_out1  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_in  = nn.FieldType(gspace,  3*[gspace.trivial_repr])
+    self.feat_type_out1  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
-    self.feat_type_out2  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_out2  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
-    self.feat_type_out3  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_out3  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
-    self.feat_type_out4  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_out4  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
-    self.feat_type_out5  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 6
-    self.feat_type_out5  = nn.FieldType(r2_act,  depth*[r2_act.regular_repr])
+    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
     keys = jax.random.split(key, 6)
     self.escnn1 = self.module(in_type=self.feat_type_in, 
@@ -574,9 +573,9 @@ class EquivImageEncoder(nj.Module):
   
 class EquivImageDecoder(nj.Module):
 
-  def __init__(self, deter, stoch, key, **kw):
+  def __init__(self, gspace, deter, stoch, key, **kw):
     module = functools.partial(nj.ESCNNModule, nn.R2Conv)
-    r2_act = gspaces.flip2dOnR2()    
+    r2_act = gspace  
     self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  128 * 16 * [r2_act.regular_repr])
     self.feat_type_hidden1  = nn.FieldType(r2_act,  128*[r2_act.regular_repr])
@@ -755,7 +754,7 @@ class MLP(nj.Module):
 class EquivMLP(MLP):
 
   def __init__(
-      self, shape, layers, units, deter, stoch, key, inputs=['tensor'], dims=None,
+      self, shape, layers, units, deter, stoch, key, gspace, inputs=['tensor'], dims=None,
       symlog_inputs=False, **kw):
 
       super().__init__(shape=shape, layers=layers, units=units, 
@@ -764,7 +763,7 @@ class EquivMLP(MLP):
     
       conv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
       pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
-      r2_act = gspaces.flip2dOnR2()    
+      r2_act = gspace    
       self.feat_type_in = nn.FieldType(r2_act, (deter // 2 + stoch // 2) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  256*[r2_act.regular_repr])
       keys = jax.random.split(key, 5)
