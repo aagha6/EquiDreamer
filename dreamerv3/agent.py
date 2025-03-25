@@ -33,8 +33,8 @@ class Agent(nj.Module):
     self.step = step
     if config.rssm.equiv:
         assert config.task == 'dmc_cartpole_swingup', 'Only DMC Cartpole Swingup task supports equivariance'
-        gspace = gspaces.flip2dOnR2()
-    self.wm = WorldModel(obs_space, act_space, config, gspace=gspace, name='wm', key=key)
+        grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
+    self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=key)
     self.task_behavior = getattr(behaviors, config.task_behavior)(
         self.wm, self.act_space, self.config, name='task_behavior')
     if config.expl_behavior == 'None':
@@ -121,30 +121,30 @@ class Agent(nj.Module):
 
 class WorldModel(nj.Module):
 
-  def __init__(self, obs_space, act_space, config, key, gspace=None):
+  def __init__(self, obs_space, act_space, config, key, grp=None):
     self.obs_space = obs_space
     self.act_space = act_space['action']
     self.config = config
     shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
     rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
-    self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, gspace=gspace, name='enc')
-    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, gspace=gspace, name='rssm')
+    self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
+    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, name='rssm')
     self.heads = {
         'decoder': nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'], **config.decoder, 
-                                      gspace=gspace, name='dec')}
+                                      grp=grp, name='dec')}
     if config.reward_head['equiv']:
       self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'], key=reward_key,
-                                     **config.reward_head, gspace=gspace, name='rew')
+                                     **config.reward_head, grp=grp, name='rew')
     else:
       self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
 
     if config.cont_head['equiv']:
       self.heads['cont'] = nets.EquivMLP((), deter=config.rssm['deter'], 
                                       stoch=config.rssm['stoch'], key=cont_key,
-                                      **config.cont_head, gspace=gspace, name='cont')
+                                      **config.cont_head, grp=grp, name='cont')
     else:
       self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
 

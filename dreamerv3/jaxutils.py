@@ -2,6 +2,7 @@ import re
 
 import jax
 import jax.numpy as jnp
+import escnn_jax.gspaces as gspaces
 import numpy as np
 import optax
 from tensorflow_probability.substrates import jax as tfp
@@ -474,3 +475,16 @@ class SlowUpdater:
         lambda s, d: mix * s + (1 - mix) * d,
         source, self.dst.getm()))
     self.updates.write(updates + 1)
+
+class GroupHelper():
+    def __init__(self, gspace):
+        if gspace == gspaces.flipRot2dOnR2:
+          raise ValueError("flipRot2dOnR2 not supported yet")
+        elif gspace == gspaces.rot2dOnR2:
+          raise ValueError("rot2dOnR2 not supported yet")
+        elif gspace == gspaces.flip2dOnR2:
+          self.grp_act = gspace()
+          self.scaler = 2 
+          self.num_rotations = 1
+        else:
+          raise ValueError("Group not indentified")

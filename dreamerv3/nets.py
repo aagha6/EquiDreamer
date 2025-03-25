@@ -21,7 +21,7 @@ econv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
 class RSSM(nj.Module):
 
   def __init__(
-      self, key, act_dim, gspace, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, act_dim, grp, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -38,32 +38,33 @@ class RSSM(nj.Module):
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
-      self._gspace = gspace
+      self._grp = grp
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
-    stoch = self._stoch // 2
-    deter = self._deter // 2
-    units = self._kw['units'] // 2
-    self._field_type_stoch  = nn.FieldType(self._gspace, stoch * 2 *
-                                                [self._gspace.regular_repr])
-    self._field_type_deter  = nn.FieldType(self._gspace,
-                                         deter * [self._gspace.regular_repr])
-    self._field_type_embed  = nn.FieldType(self._gspace,
-                                               units * [self._gspace.regular_repr])
-    self._field_type_gru_in  = nn.FieldType(self._gspace, 
-                                            (deter + units) * [self._gspace.regular_repr])
-    self._field_type_gru_out  = nn.FieldType(self._gspace, 
-                                            3 * deter * [self._gspace.regular_repr])
+    stoch = self._stoch // self._grp.scaler
+    deter = self._deter // self._grp.scaler
+    units = self._kw['units'] // self._grp.scaler
+    gspace = self._grp.grp_act
+    self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 *
+                                                [gspace.regular_repr])
+    self._field_type_deter  = nn.FieldType(gspace,
+                                         deter * [gspace.regular_repr])
+    self._field_type_embed  = nn.FieldType(gspace,
+                                               units * [gspace.regular_repr])
+    self._field_type_gru_in  = nn.FieldType(gspace, 
+                                            (deter + units) * [gspace.regular_repr])
+    self._field_type_gru_out  = nn.FieldType(gspace, 
+                                            3 * deter * [gspace.regular_repr])
     #TODO: will need to adapt
     #TODO: is this correct for cpole ?
     #TODO: make action rep more generic
-    self._field_type_img_in  = nn.FieldType(self._gspace, 
-                                            (stoch + self._act_dim) * [self._gspace.regular_repr])
+    self._field_type_img_in  = nn.FieldType(gspace, 
+                                            (stoch + self._act_dim) * [gspace.regular_repr])
                                             
     #TODO: need to clean this up, deter+embed ?
-    self._field_type_inf_in  = nn.FieldType(self._gspace, 
-                                            (deter + 3072 // 2) * [self._gspace.regular_repr])
+    self._field_type_inf_in  = nn.FieldType(gspace, 
+                                            (deter + 3072 // self._grp.scaler) * [gspace.regular_repr])
     
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key = jax.random.split(key, 5)
     self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
@@ -349,7 +350,7 @@ class RSSM(nj.Module):
 class MultiEncoder(nj.Module):
 
   def __init__(
-      self, shapes, key, gspace, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
+      self, shapes, key, grp, cnn_keys=r'.*', mlp_keys=r'.*', mlp_layers=4,
       mlp_units=512, cnn='resize', cnn_depth=48,
       cnn_blocks=2, resize='stride',
       symlog_inputs=False, minres=4, **kw):
@@ -368,7 +369,7 @@ class MultiEncoder(nj.Module):
     if cnn == 'resnet':
       self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
     elif cnn == 'equiv':
-      self._cnn = EquivImageEncoder(cnn_depth, gspace=gspace, key=key, **cnn_kw)
+      self._cnn = EquivImageEncoder(cnn_depth, grp=grp, key=key, **cnn_kw)
     if self.mlp_shapes:
       self._mlp = MLP(None, mlp_layers, mlp_units, dist='none', **mlp_kw)
 
@@ -399,7 +400,7 @@ class MultiEncoder(nj.Module):
 class MultiDecoder(nj.Module):
 
   def __init__(
-      self, shapes, key, gspace, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
+      self, shapes, key, grp, inputs=['tensor'], cnn_keys=r'.*', mlp_keys=r'.*',
       mlp_layers=4, mlp_units=512, cnn='resize', cnn_depth=48, cnn_blocks=2,
       image_dist='mse', vector_dist='mse', resize='stride', bins=255,
       outscale=1.0, minres=4, cnn_sigmoid=False, deter=None, stoch=None, **kw):
@@ -425,8 +426,8 @@ class MultiDecoder(nj.Module):
             shape, cnn_depth, cnn_blocks, resize, **cnn_kw, name='cnn')
       elif cnn=='equiv':
         assert (deter is not None and stoch is not None)
-        self._cnn = EquivImageDecoder(key=key, gspace=gspace, 
-                                      deter=deter // 2, stoch=stoch // 2, **cnn_kw, name='cnn')
+        self._cnn = EquivImageDecoder(key=key, grp=grp, 
+                                      deter=deter, stoch=stoch, **cnn_kw, name='cnn')
       else:
         raise NotImplementedError(cnn)
     if self.mlp_shapes:
@@ -511,8 +512,9 @@ class ImageEncoderResnet(nj.Module):
 
 class EquivImageEncoder(nj.Module):
 
-  def __init__(self, depth, gspace, key, **kw):
-    depth = depth // 2    
+  def __init__(self, depth, grp, key, **kw):
+    depth = depth // grp.scaler
+    gspace = grp.grp_act
     self.feat_type_in  = nn.FieldType(gspace,  3*[gspace.trivial_repr])
     self.feat_type_out1  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
@@ -523,7 +525,7 @@ class EquivImageEncoder(nj.Module):
     self.feat_type_out4  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
-    depth *= 6
+    depth *= 6 #TODO: is this necessary?
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
     keys = jax.random.split(key, 6)
@@ -573,15 +575,20 @@ class EquivImageEncoder(nj.Module):
   
 class EquivImageDecoder(nj.Module):
 
-  def __init__(self, gspace, deter, stoch, key, **kw):
-    r2_act = gspace  
-    self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
-    self.feat_type_linear  = nn.FieldType(r2_act,  128 * 16 * [r2_act.regular_repr])
-    self.feat_type_hidden1  = nn.FieldType(r2_act,  128*[r2_act.regular_repr])
-    self.feat_type_hidden2  = nn.FieldType(r2_act,  64*[r2_act.regular_repr])
-    self.feat_type_hidden3  = nn.FieldType(r2_act,  32*[r2_act.regular_repr])
-    self.feat_type_hidden4  = nn.FieldType(r2_act,  16*[r2_act.regular_repr])
-    self.feat_type_out  = nn.FieldType(r2_act,  3*[r2_act.trivial_repr])
+  def __init__(self, grp, deter, stoch, key, **kw):
+    r2_act = grp.grp_act
+    minres = kw['minres']
+    depth = 128
+    self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
+    self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
+    self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
+    depth = depth // 2
+    self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
+    depth = depth // 2
+    self.feat_type_hidden3  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
+    depth = depth // 2
+    self.feat_type_hidden4  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
+    self.feat_type_out  = nn.FieldType(r2_act,  3 * [r2_act.trivial_repr])
 
     keys = jax.random.split(key, 6)
     self.linear = econv_module(in_type=self.feat_type_in, 
@@ -753,7 +760,7 @@ class MLP(nj.Module):
 class EquivMLP(MLP):
 
   def __init__(
-      self, shape, layers, units, deter, stoch, key, gspace, inputs=['tensor'], dims=None,
+      self, shape, layers, units, deter, stoch, key, grp, inputs=['tensor'], dims=None,
       symlog_inputs=False, **kw):
 
       super().__init__(shape=shape, layers=layers, units=units, 
@@ -761,9 +768,10 @@ class EquivMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
-      r2_act = gspace    
-      self.feat_type_in = nn.FieldType(r2_act, (deter // 2 + stoch // 2) * [r2_act.regular_repr])
-      self.feat_type_hidden  = nn.FieldType(r2_act,  256*[r2_act.regular_repr])
+      r2_act = grp.grp_act    
+      units = units // grp.scaler
+      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 5)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
