@@ -425,7 +425,7 @@ class MultiDecoder(nj.Module):
             shape, cnn_depth, cnn_blocks, resize, **cnn_kw, name='cnn')
       elif cnn=='equiv':
         assert (deter is not None and stoch is not None)
-        self._cnn = EquivImageDecoder(key=key, deter=deter, stoch=stoch, name='cnn')
+        self._cnn = EquivImageDecoder(key=key, deter=deter // 2, stoch=stoch // 2, name='cnn')
       else:
         raise NotImplementedError(cnn)
     if self.mlp_shapes:
@@ -765,11 +765,8 @@ class EquivMLP(MLP):
       conv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
       pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
       r2_act = gspaces.flip2dOnR2()    
-      deter = deter // 2
-      stoch = stoch // 2
-
-      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
-      self.feat_type_hidden  = nn.FieldType(r2_act,  512*[r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter // 2 + stoch // 2) * [r2_act.regular_repr])
+      self.feat_type_hidden  = nn.FieldType(r2_act,  256*[r2_act.regular_repr])
       keys = jax.random.split(key, 5)
       self.escnn1 = conv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
