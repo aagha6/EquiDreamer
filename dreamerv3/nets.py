@@ -775,14 +775,19 @@ class EquivMLP(MLP):
       super().__init__(shape=shape, layers=layers, units=units, 
                        inputs=inputs, dims=dims, 
                        symlog_inputs=symlog_inputs, **kw)
-    
       pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
       r2_act = grp.grp_act    
       units = units // grp.scaler
-      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+
+      self.feat_type_deter = nn.FieldType(r2_act, (deter // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_stoch = nn.FieldType(r2_act, (stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
+      self._inputs = EquivInput(inputs, dims=dims, 
+                                field_types={'deter':self.feat_type_deter, 
+                                             'stoch':self.feat_type_stoch})
+
       keys = jax.random.split(key, 5)
-      self.escnn1 = econv_module(in_type=self.feat_type_in, 
+      self.escnn1 = econv_module(in_type=self.feat_type_deter + self.feat_type_stoch, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[0], name='s1conv')
       self.escnn2 = econv_module(in_type=self.feat_type_hidden, 
@@ -802,15 +807,7 @@ class EquivMLP(MLP):
 
   def __call__(self, inputs):
     feat = self._inputs(inputs)
-    if self._symlog_inputs:
-      feat = jaxutils.symlog(feat)
-    x = jaxutils.cast_to_compute(feat)
-    x = x.reshape([-1, x.shape[-1]])
-    
-    x = x[:, :, jnp.newaxis, jnp.newaxis]
-    assert len(x.shape)==4
-    x = nn.GeometricTensor(x, self.feat_type_in)
-    x = self.escnn1(x)
+    x = self.escnn1(feat)
     x = self.equiv_relu(x)
     x = self.escnn2(x)
     x = self.equiv_relu(x)
@@ -822,7 +819,7 @@ class EquivMLP(MLP):
     x = self.equiv_relu(x)
     x = self.group_pooling(x).tensor.mean(-1).mean(-1)
     
-    x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
+    x = x.reshape(inputs['deter'].shape[:-1] + (x.shape[-1],))
     if self._shape is None:
       return x
     elif isinstance(self._shape, tuple):
@@ -1062,7 +1059,28 @@ class Input:
     values = [x.astype(inputs[self._dims].dtype) for x in values]
     return jnp.concatenate(values, -1)
 
+class EquivInput:
 
+  def __init__(self, keys=['tensor'], field_types=None, dims=None):
+    assert isinstance(keys, (list, tuple)), keys
+    self._keys = tuple(keys)
+    self._dims = dims or self._keys[0]
+    assert self._keys == ('deter', 'stoch'), 'only deter and stoch supported'
+    self.field_types = field_types
+
+  def __call__(self, inputs):
+    assert 'deter' in inputs.keys() and 'stoch' in inputs.keys(), "keys don't match"
+    deter = inputs['deter'].reshape([-1, inputs['deter'].shape[-1]])
+    stoch = inputs['stoch'].reshape([-1, inputs['stoch'].shape[-1]])
+    
+    deter = deter[:, :, jnp.newaxis, jnp.newaxis]
+    stoch = stoch[:, :, jnp.newaxis, jnp.newaxis]
+    
+    assert len(deter.shape)==4 and len(stoch.shape)==4, "shape mismatch"
+    deter = nn.GeometricTensor(deter, self.field_types['deter'])
+    stoch = nn.GeometricTensor(stoch, self.field_types['stoch'])
+    return nn.tensor_directsum([deter, stoch])
+  
 class Initializer:
 
   def __init__(self, dist='uniform', scale=1.0, fan='avg'):
