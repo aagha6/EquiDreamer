@@ -581,6 +581,8 @@ class EquivImageDecoder(nj.Module):
     depth = 128
     self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
+    #TODO: clean this up
+    depth = depth * minres * minres // 4
     self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
     depth = depth // 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
@@ -588,9 +590,11 @@ class EquivImageDecoder(nj.Module):
     self.feat_type_hidden3  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
     depth = depth // 2
     self.feat_type_hidden4  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
+    depth = depth // 2
+    self.feat_type_hidden5  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
     self.feat_type_out  = nn.FieldType(r2_act,  3 * [r2_act.trivial_repr])
 
-    keys = jax.random.split(key, 6)
+    keys = jax.random.split(key, 7)
     self.linear = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_linear, 
                           kernel_size=1 ,stride=1,
@@ -617,13 +621,26 @@ class EquivImageDecoder(nj.Module):
                           key=keys[4], name='s4conv')
     self.equiv_relu4 = nn.ReLU(self.feat_type_hidden4)
     self.escnn5 = econv_module(in_type=self.feat_type_hidden4, 
-                          out_type=self.feat_type_out, 
+                          out_type=self.feat_type_hidden5, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[5], name='s5conv')
-    self._depth = 128
-    self._minres = 4
-    breaks = list(jnp.arange(0.0, self._depth * self._minres * self._minres, self._depth))[1:]
-    self._breaks = tuple(jax.tree.map(lambda x: int(x.item()), breaks))
+    self.equiv_relu5 = nn.ReLU(self.feat_type_hidden5)
+    self.escnn6 = econv_module(in_type=self.feat_type_hidden5, 
+                          out_type=self.feat_type_out, 
+                          kernel_size=3 ,stride=1, padding=1, 
+                          key=keys[5], name='s6conv')
+    self._gspace = r2_act
+
+  def _create_spatial_dims(self, x):
+    tensors = x.split(list(range(len(x.type)))[1:])
+    tensors = jax.tree.map(lambda x: x.tensor, tensors)
+    midpoint = len(tensors) // 2
+    upper, lower = tensors[:midpoint], tensors[midpoint:]
+    # TODO: is this the right axis
+    lower = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-2), lower), 1)
+    upper = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-2), upper), 1)
+    return jnp.concatenate([upper, lower], -1)
+
 
   def __call__(self, x):
     x = x[:,:,jnp.newaxis, jnp.newaxis]
@@ -631,12 +648,7 @@ class EquivImageDecoder(nj.Module):
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.linear(x)
     x = self.equiv_relu0(x)
-    #TODO: find a better way to do this
-    y = x.split(list(self._breaks))
-    y = jax.tree.map(lambda x: x.tensor, y)
-    y = jnp.concatenate(y,-1)
-    y = jnp.reshape(y, [x.shape[0], self._depth*2, self._minres, self._minres])
-    
+    y = self._create_spatial_dims(x)
     x = nn.GeometricTensor(y, self.feat_type_hidden1)
     x = self.escnn1(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
@@ -659,6 +671,11 @@ class EquivImageDecoder(nj.Module):
     x = nn.GeometricTensor(x, self.feat_type_hidden4)
     x = self.equiv_relu4(x)
     x = self.escnn5(x)
+    x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
+    x = self.get('norm5', Norm, 'escnn_layer')(x)
+    x = nn.GeometricTensor(x, self.feat_type_hidden5)
+    x = self.equiv_relu5(x)
+    x = self.escnn6(x)
     x = jaxutils.cast_to_compute(x.tensor) + 0.5
     x = jnp.moveaxis(x,1,-1)
     return x
