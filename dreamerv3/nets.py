@@ -46,41 +46,29 @@ class RSSM(nj.Module):
     deter = self._deter // self._grp.scaler
     units = self._kw['units'] // self._grp.scaler
     gspace = self._grp.grp_act
-    self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 *
-                                                [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
                                          deter * [gspace.regular_repr])
     self._field_type_embed  = nn.FieldType(gspace,
                                                units * [gspace.regular_repr])
-    self._field_type_gru_in  = nn.FieldType(gspace, 
-                                            (deter + units) * [gspace.regular_repr])
-    self._field_type_gru_out  = nn.FieldType(gspace, 
-                                            3 * deter * [gspace.regular_repr])
-    #TODO: will need to adapt
-    #TODO: is this correct for cpole ?
-    #TODO: make action rep more generic
-    self._field_type_img_in  = nn.FieldType(gspace, 
-                                            (stoch + self._act_dim) * [gspace.regular_repr])
-                                            
-    #TODO: need to clean this up, deter+embed ?
-    self._field_type_inf_in  = nn.FieldType(gspace, 
-                                            (deter + 3072 // self._grp.scaler) * [gspace.regular_repr])
+    self._field_type_stoch  = nn.FieldType(gspace, stoch * [gspace.regular_repr])
+    self._field_type_act  = nn.FieldType(gspace, self._act_dim * [gspace.regular_repr])
+    self._field_type_obs  = nn.FieldType(gspace, (3072 // self._grp.scaler) * [gspace.regular_repr])
     
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key = jax.random.split(key, 5)
-    self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
+    self.init_img_in = nn.R2Conv(in_type=self._field_type_stoch + self._field_type_act,
                                     out_type=self._field_type_embed,
                                     kernel_size=1, key=img_in_key)
     self.init_img_out = nn.R2Conv(in_type=self._field_type_deter,
                                   out_type=self._field_type_embed,
                                   kernel_size=1, key=img_out_key)
-    self.init_obs_out = nn.R2Conv(in_type=self._field_type_inf_in,
+    self.init_obs_out = nn.R2Conv(in_type=self._field_type_deter + self._field_type_obs,
                                   out_type=self._field_type_embed,
                                   kernel_size=1,key=obs_out_key)
-    self.init_stoch_mean = nn.R2Conv(in_type=self._field_type_embed,
-                                    out_type=self._field_type_stoch,
+    self.init_stoch_out = nn.R2Conv(in_type=self._field_type_embed,
+                                    out_type=self._field_type_stoch + self._field_type_stoch,
                                     kernel_size=1, key=stoch_mean_key)
-    gru_kw = {"in_type":self._field_type_gru_in,
-              "out_type":self._field_type_gru_out, 
+    gru_kw = {"in_type":self._field_type_deter + self._field_type_embed,
+              "out_type": self._field_type_deter + self._field_type_deter + self._field_type_deter, 
               "kernel_size":1, 'stride':1, 
               'key':gru_key}    
     self.init_gru_cell = nn.R2Conv(**gru_kw)
@@ -164,16 +152,21 @@ class RSSM(nj.Module):
         lambda x, y: x + self._mask(y, is_first),
         prev_state, self.initial(len(is_first)))
     prior = self.img_step(prev_state, prev_action)
-    x = jnp.concatenate([prior['deter'], embed], -1)
     if self._equiv:
+      deter = nn.GeometricTensor(prior['deter'][:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_deter)
+      embed = nn.GeometricTensor(embed[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_obs)
+      x = nn.tensor_directsum([deter, embed])
       x = self.get('obs_out', 
                   EquivLinear, 
                   **{"net":self.init_obs_out, 
-                  'in_type':self._field_type_inf_in,
+                  'in_type':self._field_type_deter + self._field_type_obs,
                   'out_type':self._field_type_embed,
                   'norm':self._kw['norm'],
                   'act':'equiv_relu'})(x)
     else:
+      x = jnp.concatenate([prior['deter'], embed], -1)
       x = self.get('obs_out', Linear, **self._kw)(x)    
     stats = self._stats('obs_stats', x)
     dist = self.get_dist(stats)
@@ -195,11 +188,15 @@ class RSSM(nj.Module):
       prev_action = prev_action.reshape(shape)
     if self._equiv:
       act = jnp.concatenate([prev_action, -prev_action], -1)
-      x = jnp.concatenate([prev_stoch, act], -1)
+      act = nn.GeometricTensor(act[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_act)
+      prev_stoch = nn.GeometricTensor(prev_stoch[:, :, jnp.newaxis, jnp.newaxis], 
+                                      self._field_type_stoch)
+      x = nn.tensor_directsum([prev_stoch, act])
       x = self.get('img_in', 
                     EquivLinear, 
                     **{"net":self.init_img_in, 
-                      'in_type':self._field_type_img_in,
+                      'in_type':self._field_type_stoch + self._field_type_act,
                       'out_type':self._field_type_embed,
                       'norm':self._kw['norm'],
                       'act':'equiv_relu'})(x)
@@ -213,6 +210,8 @@ class RSSM(nj.Module):
     else:
       x, deter = self._gru(x, prev_state['deter'])      
     if self._equiv:
+      x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_deter)
       x = self.get('img_out', 
                   EquivLinear, 
                   **{"net":self.init_img_out, 
@@ -230,6 +229,8 @@ class RSSM(nj.Module):
 
   def get_stoch(self, deter):
     if self._equiv:
+      deter = nn.GeometricTensor(deter[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_deter)
       x = self.get('img_out', 
                   EquivLinear, 
                   **{"net":self.init_img_out, 
@@ -259,14 +260,19 @@ class RSSM(nj.Module):
     return deter, deter
 
   def _equiv_gru(self, x, deter):
-    x = jnp.concatenate([x, deter], 1) # TODO: is this equiv?
+    x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_embed)
+    deter = nn.GeometricTensor(deter[:, :, jnp.newaxis, jnp.newaxis],
+                               self._field_type_deter)
+    x = nn.tensor_directsum([deter, x])
     gru_out = self.get('gru',
                       EquivGRUCell,
                       **{"net":self.init_gru_cell,
-                      'in_type':self._field_type_gru_in,
-                      'out_type':self._field_type_gru_out,
+                      'in_type':self._field_type_deter + self._field_type_embed,
+                      'out_type':self._field_type_deter + self._field_type_deter + self._field_type_deter,
                       'norm':self._kw['norm'],
                       'act':'none'})(x)
+    #TODO: is this equivariant ?
     reset, cand, update = gru_out.split(list(self._gru_breaks))
     reset = reset.tensor.mean(-1).mean(-1)
     cand = cand.tensor.mean(-1).mean(-1)
@@ -274,7 +280,7 @@ class RSSM(nj.Module):
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
     update = jax.nn.sigmoid(update - 1)
-    deter = update * cand + (1 - update) * deter
+    deter = update * cand + (1 - update) * deter.tensor.mean(-1).mean(-1)
     return deter, deter
  
   def _gru(self, x, deter):
@@ -301,12 +307,15 @@ class RSSM(nj.Module):
       return stats
     else:
       if self._equiv:
+        x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], 
+                               self._field_type_embed)
         x = self.get(f'{name}', 
                       EquivGRUCell, 
-                      **{"net":self.init_stoch_mean, 
+                      **{"net":self.init_stoch_out, 
                         'in_type':self._field_type_embed,
-                        'out_type':self._field_type_stoch,
+                        'out_type':self._field_type_stoch+self._field_type_stoch,
                         'act':'none'})(x)
+        #TODO: is this equivariant ?
         mean, std = x.split(list(self._stoch_breaks))
         mean = mean.tensor.mean(-1).mean(-1)
         std = std.tensor.mean(-1).mean(-1)
@@ -986,22 +995,16 @@ class EquivLinear(nj.Module):
     self._norm = norm
 
   def __call__(self, x):
-    x = x[:, :, jnp.newaxis, jnp.newaxis]
-    assert len(x.shape)==4
-    x = nn.GeometricTensor(x, self._in_type)
     x = self._ecnn(x)
     x = self.get('norm', Norm, self._norm)(x.tensor.mean(-1).mean(-1))
     x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._out_type)
     x = self._act(x).tensor.mean(-1).mean(-1)
     return x
 
-
+#TODO: merge classes!
 class EquivGRUCell(EquivLinear):
 
   def __call__(self, x):
-    x = x[:, :, jnp.newaxis, jnp.newaxis]
-    assert len(x.shape)==4
-    x = nn.GeometricTensor(x, self._in_type)
     x = self._ecnn(x)
     x = self.get('norm', Norm, self._norm)(x.tensor.mean(-1).mean(-1))
     x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._out_type)
