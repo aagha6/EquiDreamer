@@ -637,9 +637,9 @@ class EquivImageDecoder(nj.Module):
     midpoint = len(tensors) // 2
     upper, lower = tensors[:midpoint], tensors[midpoint:]
     # TODO: is this the right axis
-    lower = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-2), lower), 1)
-    upper = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-2), upper), 1)
-    return jnp.concatenate([upper, lower], -1)
+    lower = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-1), lower), 1)
+    upper = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-1), upper), 1)
+    return jnp.concatenate([upper, lower], -2)
 
 
   def __call__(self, x):
