@@ -22,7 +22,7 @@ class RSSM(nj.Module):
 
   def __init__(
       self, key, act_dim, grp, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, **kw):
+      unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, embed_size=None, **kw):
     self._deter = deter
     self._stoch = stoch
     self._classes = classes
@@ -38,6 +38,8 @@ class RSSM(nj.Module):
     if self.conv_gru and self._equiv:
       raise ValueError("both can't be True")    
     if self._equiv:
+      assert embed_size is not None
+      self.embed_size = embed_size
       self._grp = grp
       self.init_equiv_nets(key)
 
@@ -64,7 +66,7 @@ class RSSM(nj.Module):
                                             
     #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(gspace, 
-                                            (deter + 3072 // self._grp.scaler) * [gspace.regular_repr])
+                                            (deter + self.embed_size) * [gspace.regular_repr])
     
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key = jax.random.split(key, 5)
     self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
@@ -427,7 +429,8 @@ class MultiDecoder(nj.Module):
       elif cnn=='equiv':
         assert (deter is not None and stoch is not None)
         self._cnn = EquivImageDecoder(key=key, grp=grp, 
-                                      deter=deter, stoch=stoch, **cnn_kw, name='cnn')
+                                      deter=deter, cnn_depth=cnn_depth,
+                                      stoch=stoch, **cnn_kw, name='cnn')
       else:
         raise NotImplementedError(cnn)
     if self.mlp_shapes:
@@ -525,8 +528,6 @@ class EquivImageEncoder(nj.Module):
     self.feat_type_out4  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
-    depth *= 6 #TODO: is this necessary?
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
     keys = jax.random.split(key, 6)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
@@ -575,15 +576,15 @@ class EquivImageEncoder(nj.Module):
   
 class EquivImageDecoder(nj.Module):
 
-  def __init__(self, grp, deter, stoch, key, **kw):
+  def __init__(self, grp, deter, cnn_depth, stoch, key, **kw):
     r2_act = grp.grp_act
     minres = kw['minres']
-    depth = 128
+    depth = cnn_depth
     self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
     #TODO: clean this up
     depth = depth * minres * minres // 4
-    self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * 2 * [r2_act.trivial_repr])
+    self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.trivial_repr])
     depth = depth // 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
     depth = depth // 2

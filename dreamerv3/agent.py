@@ -129,7 +129,11 @@ class WorldModel(nj.Module):
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
     rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
     self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
-    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, name='rssm')
+    embed_size = None
+    if config.rssm.equiv:
+      embed_size = config.encoder.cnn_depth // grp.scaler  * 2 ** 4
+    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
+                          embed_size=embed_size, name='rssm')
     self.heads = {
         'decoder': nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'], **config.decoder, 
