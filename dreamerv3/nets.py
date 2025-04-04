@@ -528,6 +528,8 @@ class EquivImageEncoder(nj.Module):
     self.feat_type_out4  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
+    depth *= 6
+    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
     keys = jax.random.split(key, 6)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
