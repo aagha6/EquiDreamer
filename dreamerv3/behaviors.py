@@ -10,10 +10,10 @@ from . import jaxutils
 
 class Greedy(nj.Module):
 
-  def __init__(self, wm, act_space, config):
+  def __init__(self, wm, act_space, config, key, grp):
     rewfn = lambda s: wm.heads['reward'](s).mean()[1:]
     if config.critic_type == 'vfunction':
-      critics = {'extr': agent.VFunction(rewfn, config, name='critic')}
+      critics = {'extr': agent.VFunction(rewfn, config, grp, name='critic', key=key)}
     else:
       raise NotImplementedError(config.critic_type)
     self.ac = agent.ImagActorCritic(

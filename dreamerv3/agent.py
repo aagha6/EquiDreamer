@@ -34,9 +34,10 @@ class Agent(nj.Module):
     if config.rssm.equiv:
         assert config.task == 'dmc_cartpole_swingup', 'Only DMC Cartpole Swingup task supports equivariance'
         grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
-    self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=key)
+    wm_key, beh_key  = jax.random.split(key, 2)
+    self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=wm_key)
     self.task_behavior = getattr(behaviors, config.task_behavior)(
-        self.wm, self.act_space, self.config, name='task_behavior')
+        self.wm, self.act_space, self.config, key=beh_key, grp=grp, name='task_behavior')
     if config.expl_behavior == 'None':
       self.expl_behavior = self.task_behavior
     else:
@@ -341,11 +342,20 @@ class ImagActorCritic(nj.Module):
 
 class VFunction(nj.Module):
 
-  def __init__(self, rewfn, config):
+  def __init__(self, rewfn, config, grp, key):
     self.rewfn = rewfn
     self.config = config
-    self.net = nets.MLP((), name='net', dims='deter', **self.config.critic)
-    self.slow = nets.MLP((), name='slow', dims='deter', **self.config.critic)
+    net_key, slow_key = jax.random.split(key)
+    if config.rssm.equiv:
+      self.net = nets.EquivMLP((), deter=config.rssm['deter'], 
+                                     stoch=config.rssm['stoch'], key=net_key,
+                                     **self.config.critic, grp=grp, name='net')
+      self.slow = nets.EquivMLP((), deter=config.rssm['deter'], 
+                                     stoch=config.rssm['stoch'], key=slow_key,
+                                     **self.config.critic, grp=grp, name='slow')
+    else:
+      self.net = nets.MLP((), name='net', dims='deter', **self.config.critic)
+      self.slow = nets.MLP((), name='slow', dims='deter', **self.config.critic)
     self.updater = jaxutils.SlowUpdater(
         self.net, self.slow,
         self.config.slow_critic_fraction,

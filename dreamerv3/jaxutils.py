@@ -2,8 +2,9 @@ import re
 
 import jax
 import jax.numpy as jnp
+import escnn_jax.nn as nn
 import escnn_jax.gspaces as gspaces
-import numpy as np
+
 import optax
 from tensorflow_probability.substrates import jax as tfp
 
@@ -453,6 +454,17 @@ def tree_keys(params, prefix=''):
     raise TypeError(type(params))
 
 
+def polyak_averaging(src, dst, mix):
+  for k, v in src.items():
+    if isinstance(v, nn.EquivariantModule):
+      if isinstance(v, nn.R2Conv):
+        #TODO: need to find a way to do this without modifying the frozen weights
+        dst[k].weights = nn.equinox.ParameterArray(mix * v.weights.array + (1 - mix) * dst[k].weights.array)
+        dst[k].bias = nn.equinox.ParameterArray(mix * v.bias.array + (1 - mix) * dst[k].bias.array)
+    else:
+      dst[k] = tree_map(lambda s,d: mix * s + (1 - mix) * d, v, dst[k])
+  return dst
+
 class SlowUpdater:
 
   def __init__(self, src, dst, fraction=1.0, period=1):
@@ -471,9 +483,8 @@ class SlowUpdater:
     source = {
         k.replace(f'/{self.src.name}/', f'/{self.dst.name}/'): v
         for k, v in self.src.getm().items()}
-    self.dst.putm(tree_map(
-        lambda s, d: mix * s + (1 - mix) * d,
-        source, self.dst.getm()))
+    dist = self.dst.getm()
+    self.dst.putm(polyak_averaging(source, dist, mix))
     self.updates.write(updates + 1)
 
 class GroupHelper():
