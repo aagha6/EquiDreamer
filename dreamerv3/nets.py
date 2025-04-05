@@ -783,7 +783,7 @@ class EquivMLP(MLP):
 
   def __init__(
       self, shape, layers, units, deter, stoch, key, grp, inputs=['tensor'], dims=None,
-      symlog_inputs=False, **kw):
+      symlog_inputs=False, invariant=True, **kw):
 
       super().__init__(shape=shape, layers=layers, units=units, 
                        inputs=inputs, dims=dims, 
@@ -794,7 +794,7 @@ class EquivMLP(MLP):
       units = units // grp.scaler
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
-      keys = jax.random.split(key, 5)
+      keys = jax.random.split(key, 7)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[0], name='s1conv')
@@ -810,7 +810,22 @@ class EquivMLP(MLP):
       self.escnn5 = econv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[4], name='s5conv')
-      self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
+      if invariant:
+        self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
+        self._field_out_type = None
+        self._init_equiv_actor = None
+      else:
+        assert isinstance(shape, tuple)
+        gspace = grp.grp_act
+        self._field_out_type = nn.FieldType(gspace,  shape[0]*[r2_act.regular_repr])
+        self._field_std_type = nn.FieldType(gspace,  shape[0]*[r2_act.trivial_repr])
+        self._init_equiv_actor = nn.R2Conv(in_type=self.feat_type_hidden,
+                                    out_type=self._field_out_type,
+                                    kernel_size=1, key=keys[5])
+        self._init_equiv_std = nn.R2Conv(in_type=self.feat_type_hidden,
+                                    out_type=self._field_std_type,
+                                    kernel_size=1, key=keys[6])
+      self.invariant = invariant
       self.equiv_relu = nn.ReLU(self.feat_type_hidden)
 
   def __call__(self, inputs):
@@ -833,7 +848,10 @@ class EquivMLP(MLP):
     x = self.equiv_relu(x)
     x = self.escnn5(x)
     x = self.equiv_relu(x)
-    x = self.group_pooling(x).tensor.mean(-1).mean(-1)
+    if self.invariant:
+      x = self.group_pooling(x).tensor.mean(-1).mean(-1)
+    else:
+      x = x.tensor.mean(-1).mean(-1)
     
     x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
     if self._shape is None:
@@ -846,6 +864,12 @@ class EquivMLP(MLP):
       raise ValueError(self._shape)
 
   def _out(self, name, shape, x):
+    if self._dist['dist'] == 'equiv_normal':
+      self._dist['in_type'] = self.feat_type_hidden
+      self._dist['out_type'] = self._field_out_type
+      self._dist['std_type'] = self._field_std_type
+      self._dist['init_equiv_actor'] = self._init_equiv_actor
+      self._dist['init_equiv_std'] = self._init_equiv_std
     return self.get(f'dist_{name}', Dist, shape, **self._dist)(x)
 
 
@@ -853,7 +877,8 @@ class Dist(nj.Module):
 
   def __init__(
       self, shape, dist='mse', outscale=0.1, outnorm=False, minstd=1.0,
-      maxstd=1.0, unimix=0.0, bins=255):
+      maxstd=1.0, unimix=0.0, bins=255, in_type=None, out_type=None, 
+      std_type=None, init_equiv_std=None, init_equiv_actor=None):
     assert all(isinstance(dim, int) for dim in shape), shape
     self._shape = shape
     self._dist = dist
@@ -863,6 +888,13 @@ class Dist(nj.Module):
     self._outscale = outscale
     self._outnorm = outnorm
     self._bins = bins
+    if dist=='equiv_normal':
+      assert in_type is not None and out_type is not None and init_equiv_actor is not None
+      self._field_in_type = in_type
+      self._field_out_type = out_type
+      self._field_std_type = std_type
+      self._init_equiv_actor = init_equiv_actor
+      self._init_equiv_std = init_equiv_std
 
   def __call__(self, inputs):
     dist = self.inner(inputs)
@@ -875,10 +907,31 @@ class Dist(nj.Module):
     kw['outscale'] = self._outscale
     kw['outnorm'] = self._outnorm
     shape = self._shape
+    inputs_shape = inputs.shape
     if self._dist.endswith('_disc'):
       shape = (*self._shape, self._bins)
-    out = self.get('out', Linear, int(np.prod(shape)), **kw)(inputs)
-    out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
+    if self._dist == 'equiv_normal':
+      inputs = inputs.reshape([-1, inputs.shape[-1]])
+      out = self.get('out', 
+                  EquivLinear, 
+                  **{"net":self._init_equiv_actor, 
+                  'in_type':self._field_in_type,
+                  'out_type':self._field_out_type,
+                  'norm':'none',
+                  'act':'none'})(inputs)
+      out = out.reshape(inputs_shape[:-1] + (out.shape[-1],)).astype(f32)
+    else:
+      out = self.get('out', Linear, int(np.prod(shape)), **kw)(inputs)
+      out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
+    if self._dist in ('equiv_normal'):
+      std = self.get('std', 
+                  EquivLinear, 
+                  **{"net":self._init_equiv_std, 
+                  'in_type':self._field_in_type,
+                  'out_type':self._field_std_type,
+                  'norm':'none',
+                  'act':'none'})(inputs)
+      std = std.reshape(inputs_shape[:-1] + (std.shape[-1],)).astype(f32)
     if self._dist in ('normal', 'trunc_normal'):
       std = self.get('std', Linear, int(np.prod(self._shape)), **kw)(inputs)
       std = std.reshape(inputs.shape[:-1] + self._shape).astype(f32)
@@ -892,6 +945,16 @@ class Dist(nj.Module):
     if self._dist == 'normal':
       lo, hi = self._minstd, self._maxstd
       std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
+      dist = tfd.Normal(jnp.tanh(out), std)
+      dist = tfd.Independent(dist, len(self._shape))
+      dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()
+      dist.maxent = np.prod(self._shape) * tfd.Normal(0.0, hi).entropy()
+      return dist
+    if self._dist == 'equiv_normal':
+      lo, hi = self._minstd, self._maxstd
+      std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
+      #TODO: make it more general to higher dimensional action spaces
+      out = out @ jnp.array([1,-1])[:,jnp.newaxis]
       dist = tfd.Normal(jnp.tanh(out), std)
       dist = tfd.Independent(dist, len(self._shape))
       dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()

@@ -262,7 +262,7 @@ class WorldModel(nj.Module):
 
 class ImagActorCritic(nj.Module):
 
-  def __init__(self, critics, scales, act_space, config):
+  def __init__(self, critics, scales, act_space, config, grp, actor_key):
     critics = {k: v for k, v in critics.items() if scales[k]}
     for key, scale in scales.items():
       assert not scale or key in critics, key
@@ -272,7 +272,13 @@ class ImagActorCritic(nj.Module):
     self.config = config
     disc = act_space.discrete
     self.grad = config.actor_grad_disc if disc else config.actor_grad_cont
-    self.actor = nets.MLP(
+    if config.rssm.equiv:
+      self.actor = nets.EquivMLP(
+        name='actor', invariant=False, deter=config.rssm['deter'], grp=grp, key=actor_key,
+        stoch=config.rssm['stoch'], shape=act_space.shape, **config.actor,
+        dist=config.actor_dist_disc if disc else config.actor_dist_cont)  
+    else:
+      self.actor = nets.MLP(
         name='actor', dims='deter', shape=act_space.shape, **config.actor,
         dist=config.actor_dist_disc if disc else config.actor_dist_cont)
     self.retnorms = {
