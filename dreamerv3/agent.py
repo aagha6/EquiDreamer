@@ -132,7 +132,7 @@ class WorldModel(nj.Module):
     self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
     embed_size = None
     if config.rssm.equiv:
-      embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
+      embed_size = self.encoder._cnn.repr_dim.item()
     self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
                           embed_size=embed_size, name='rssm')
     self.heads = {

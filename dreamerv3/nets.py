@@ -17,7 +17,10 @@ from . import ninjax as nj
 cast = jaxutils.cast_to_compute
 eqx_conv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
 econv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
-  
+
+def identity(x: jnp.array):
+  return jnp.asarray(x)
+
 class RSSM(nj.Module):
 
   def __init__(
@@ -526,12 +529,20 @@ class EquivImageEncoder(nj.Module):
     self.feat_type_out3  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
     self.feat_type_out4  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
-    depth *= 2
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
-    depth *= 6
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
-    keys = jax.random.split(key, 6)
+    self.gspace = gspace
+    repr_shape = (depth, 4, 4)
+    self.repr_dim = np.prod(repr_shape)
+
+    self.flat_type = nn.FieldType(
+            self.gspace,
+            self.gspace.fibergroup.order() * self.repr_dim * [self.gspace.regular_repr],
+        )
+    self.flat_out_type = nn.FieldType(
+            self.gspace, self.repr_dim * [self.gspace.regular_repr]
+        )
+
+    keys = jax.random.split(key, 5)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out1, 
                           kernel_size=3 ,stride=1,
@@ -558,13 +569,43 @@ class EquivImageEncoder(nj.Module):
                           kernel_size=3 ,stride=1,
                           key=keys[3], name='s4conv')
     self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
-    self.escnn5 = econv_module(in_type=self.feat_type_out4, 
-                          out_type=self.feat_type_out5,
-                          kernel_size=3 ,stride=1,
+    self.basespace_transforms = [identity, functools.partial(jnp.flip, axis=-1)]
+
+    self.escnn5 = econv_module(in_type=self.flat_type, 
+                          out_type=self.flat_out_type,
+                          kernel_size=1 ,stride=1,
                           key=keys[4], name='s5conv')
-    self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
-    self.s5pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out5,
-                        kernel_size=2, stride=2)
+    self.equiv_relu5 = nn.ReLU(self.flat_out_type)
+
+  def diff_transform(self, input, element, basespace_transform):
+        input_tensor = input.tensor
+
+        # Fibergroup
+        representation = input.type.fiber_representation(element)
+        output = jnp.einsum(
+            "oi,bi...->bo...", representation, input_tensor
+        )
+
+        # Basespace
+        output = basespace_transform(output)
+
+        return output
+  
+  def restrict_functor(self, h):
+        ginv_x = []
+        for g, bs_trans in zip(self.gspace.testing_elements, self.basespace_transforms):
+
+            # Need to use g_inverse
+            val = self.diff_transform(h, ~g, bs_trans)
+            ginv_x.append(val)
+
+        ginv_x = jnp.stack(ginv_x, axis=-1)
+
+        # TODO: not at all sure about this
+        ginv_x = ginv_x.reshape([h.shape[0], -1, 1, 1]) 
+        ginv_x = nn.GeometricTensor(ginv_x, self.flat_type)
+
+        return ginv_x
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
@@ -581,9 +622,9 @@ class EquivImageEncoder(nj.Module):
     x = self.s3pool(x)
     x = self.escnn4(x)
     x = self.equiv_relu4(x)
+    x = self.restrict_functor(x)
     x = self.escnn5(x)
     x = self.equiv_relu5(x)
-    x = self.s5pool(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
     return x
