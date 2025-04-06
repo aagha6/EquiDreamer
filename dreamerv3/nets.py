@@ -529,41 +529,50 @@ class EquivImageEncoder(nj.Module):
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 6
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
+    self.feat_type_out6  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
     keys = jax.random.split(key, 6)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out1, 
-                          kernel_size=3 ,stride=1,
+                          kernel_size=3 ,stride=1, padding=1,
                           key=keys[0], name='s1conv')
     self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
     self.s1pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out1,
                         kernel_size=2, stride=2)
     self.escnn2 = econv_module(in_type=self.feat_type_out1,
                           out_type=self.feat_type_out2,
-                          kernel_size=3 ,stride=1,
+                          kernel_size=3 ,stride=1, padding=1,
                           key=keys[1], name='s2conv')
     self.equiv_relu2 = nn.ReLU(self.feat_type_out2)
     self.s2pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out2,
                         kernel_size=2, stride=2)
     self.escnn3 = econv_module(in_type=self.feat_type_out2,
                           out_type=self.feat_type_out3,
-                          kernel_size=3 ,stride=1,
+                          kernel_size=3 ,stride=1, padding=1,
                           key=keys[2], name='s3conv')
     self.equiv_relu3 = nn.ReLU(self.feat_type_out3)
     self.s3pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out3,
                         kernel_size=2, stride=2)
     self.escnn4 = econv_module(in_type=self.feat_type_out3, 
                           out_type=self.feat_type_out4,
-                          kernel_size=3 ,stride=1,
+                          kernel_size=3 ,stride=1, padding=1,
                           key=keys[3], name='s4conv')
     self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
+    self.s4pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out4,
+                        kernel_size=2, stride=2)    
     self.escnn5 = econv_module(in_type=self.feat_type_out4, 
                           out_type=self.feat_type_out5,
-                          kernel_size=3 ,stride=1,
+                          kernel_size=3 ,stride=1, padding=1,
                           key=keys[4], name='s5conv')
     self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
     self.s5pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out5,
+                        kernel_size=2, stride=2)    
+    self.escnn6 = econv_module(in_type=self.feat_type_out5, 
+                          out_type=self.feat_type_out6,
+                          kernel_size=3 ,stride=1, padding=1,
+                          key=keys[5], name='s6conv')
+    self.equiv_relu6 = nn.ReLU(self.feat_type_out6)
+    self.s6pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out6,
                         kernel_size=2, stride=2)
 
   def __call__(self, x):
@@ -581,9 +590,13 @@ class EquivImageEncoder(nj.Module):
     x = self.s3pool(x)
     x = self.escnn4(x)
     x = self.equiv_relu4(x)
+    x = self.s4pool(x)
     x = self.escnn5(x)
     x = self.equiv_relu5(x)
     x = self.s5pool(x)
+    x = self.escnn6(x)
+    x = self.equiv_relu6(x)
+    x = self.s6pool(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
     return x
@@ -599,15 +612,15 @@ class EquivImageDecoder(nj.Module):
     #TODO: clean this up
     depth = depth * minres * minres // grp.scaler
     self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.trivial_repr])
-    depth = depth // 2
+    depth = 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
-    depth = depth // 2
+    depth = 2
     self.feat_type_hidden3  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
-    depth = depth // 2
+    depth = 2
     self.feat_type_hidden4  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
-    depth = depth // 2
+    depth = 2
     self.feat_type_hidden5  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
-    depth = depth // 2
+    depth = 2
     self.feat_type_hidden6  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
     self.feat_type_out  = nn.FieldType(r2_act,  3 * [r2_act.trivial_repr])
 
