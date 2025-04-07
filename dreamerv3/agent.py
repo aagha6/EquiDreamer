@@ -31,8 +31,9 @@ class Agent(nj.Module):
     self.obs_space = obs_space
     self.act_space = act_space['action']
     self.step = step
+    grp = None
     if config.rssm.equiv:
-        assert config.task == 'dmc_cartpole_swingup', 'Only DMC Cartpole Swingup task supports equivariance'
+        #assert config.task == 'dmc_cartpole_swingup', 'Only DMC Cartpole Swingup task supports equivariance'
         grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
     wm_key, beh_key  = jax.random.split(key, 2)
     self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=wm_key)
