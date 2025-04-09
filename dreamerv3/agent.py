@@ -138,18 +138,21 @@ class WorldModel(nj.Module):
                           embed_size=embed_size, name='rssm')
     self.heads = {
         'decoder': nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'], **config.decoder, 
+                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                     **config.decoder, 
                                       grp=grp, name='dec')}
     if config.reward_head['equiv']:
       self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'], key=reward_key,
+                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                     key=reward_key,
                                      **config.reward_head, grp=grp, name='rew')
     else:
       self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
 
     if config.cont_head['equiv']:
       self.heads['cont'] = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                      stoch=config.rssm['stoch'], key=cont_key,
+                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                      key=cont_key,
                                       **config.cont_head, grp=grp, name='cont')
     else:
       self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
@@ -276,7 +279,8 @@ class ImagActorCritic(nj.Module):
     if config.rssm.equiv:
       self.actor = nets.EquivMLP(
         name='actor', invariant=False, deter=config.rssm['deter'], grp=grp, key=actor_key,
-        stoch=config.rssm['stoch'], shape=act_space.shape, **config.actor,
+        stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+        shape=act_space.shape, **config.actor,
         dist=config.actor_dist_disc if disc else config.actor_dist_cont)  
     else:
       self.actor = nets.MLP(
@@ -355,10 +359,12 @@ class VFunction(nj.Module):
     net_key, slow_key = jax.random.split(key)
     if config.rssm.equiv:
       self.net = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'], key=net_key,
+                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                     key=net_key,
                                      **self.config.critic, grp=grp, name='net')
       self.slow = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'], key=slow_key,
+                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                     key=slow_key,
                                      **self.config.critic, grp=grp, name='slow')
     else:
       self.net = nets.MLP((), name='net', dims='deter', **self.config.critic)

@@ -48,8 +48,10 @@ class RSSM(nj.Module):
     deter = self._deter // self._grp.scaler
     units = self._kw['units'] // self._grp.scaler
     gspace = self._grp.grp_act
-    self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 *
-                                                [gspace.regular_repr])
+    if self._classes:
+      self._field_type_stoch  = nn.FieldType(gspace, stoch * self._classes * [gspace.regular_repr])
+    else:
+      self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
                                          deter * [gspace.regular_repr])
     self._field_type_embed  = nn.FieldType(gspace,
@@ -61,8 +63,12 @@ class RSSM(nj.Module):
     #TODO: will need to adapt
     #TODO: is this correct for cpole ?
     #TODO: make action rep more generic
-    self._field_type_img_in  = nn.FieldType(gspace, 
-                                            (stoch + self._act_dim) * [gspace.regular_repr])
+    if self._classes:
+      self._field_type_img_in  = nn.FieldType(gspace, 
+                                              (stoch * self._classes + self._act_dim) * [gspace.regular_repr])
+    else:
+      self._field_type_img_in  = nn.FieldType(gspace, 
+                                              (stoch + self._act_dim) * [gspace.regular_repr])
                                             
     #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(gspace, 
@@ -94,8 +100,12 @@ class RSSM(nj.Module):
   def initial(self, bs):
     if self._classes:
       if self._equiv:
-        raise ValueError("can't use equivariance here")      
-      else:
+        scaler = self._grp.scaler
+        state = dict(
+          deter=jnp.zeros([bs, self._deter], f32),
+          logit=jnp.zeros([bs, self._stoch * self._classes // scaler, scaler], f32),
+          stoch=jnp.zeros([bs, self._stoch * self._classes // scaler, scaler], f32))
+      else:  
         state = dict(
             deter=jnp.zeros([bs, self._deter], f32),
             logit=jnp.zeros([bs, self._stoch, self._classes], f32),
@@ -292,8 +302,22 @@ class RSSM(nj.Module):
 
   def _stats(self, name, x):
     if self._classes:
-      x = self.get(name, Linear, self._stoch * self._classes)(x)
-      logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
+      if self._equiv:
+        flat_logits = self.get(f'{name}', 
+                      EquivLinear, 
+                      **{"net":self.init_stoch_mean, 
+                        'in_type':self._field_type_embed,
+                        'out_type':self._field_type_stoch,
+                        'norm':'none',
+                        'act': 'none'})(x)
+        flat_logits = nn.GeometricTensor(flat_logits[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch)
+        logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
+        logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
+        logit = jnp.concatenate(logits_list, 1)
+        logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
+      else:
+        x = self.get(name, Linear, self._stoch * self._classes)(x)
+        logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
       if self._unimix:
         probs = jax.nn.softmax(logit, -1)
         uniform = jnp.ones_like(probs) / probs.shape[-1]
@@ -926,7 +950,7 @@ class Dist(nj.Module):
     else:
       out = self.get('out', Linear, int(np.prod(shape)), **kw)(inputs)
       out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
-    if self._dist in ('equiv_normal'):
+    if self._dist == ('equiv_normal'):
       std = self.get('std', 
                   EquivLinear, 
                   **{"net":self._init_equiv_std, 
