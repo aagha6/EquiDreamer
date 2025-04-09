@@ -950,7 +950,7 @@ class Dist(nj.Module):
     else:
       out = self.get('out', Linear, int(np.prod(shape)), **kw)(inputs)
       out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
-    if self._dist == ('equiv_normal'):
+    if self._dist == 'equiv_normal':
       std = self.get('std', 
                   EquivLinear, 
                   **{"net":self._init_equiv_std, 
