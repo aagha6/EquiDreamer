@@ -47,9 +47,10 @@ class RSSM(nj.Module):
     stoch = self._stoch // self._grp.scaler
     deter = self._deter // self._grp.scaler
     units = self._kw['units'] // self._grp.scaler
+    classes = self._classes // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
-      self._field_type_stoch  = nn.FieldType(gspace, stoch * self._classes * [gspace.regular_repr])
+      self._field_type_stoch  = nn.FieldType(gspace, self._stoch * classes * [gspace.regular_repr])
     else:
       self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
@@ -65,7 +66,7 @@ class RSSM(nj.Module):
     #TODO: make action rep more generic
     if self._classes:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch * self._classes + self._act_dim) * [gspace.regular_repr])
+                                              (self._stoch * classes + self._act_dim) * [gspace.regular_repr])
     else:
       self._field_type_img_in  = nn.FieldType(gspace, 
                                               (stoch + self._act_dim) * [gspace.regular_repr])
@@ -99,17 +100,10 @@ class RSSM(nj.Module):
 
   def initial(self, bs):
     if self._classes:
-      if self._equiv:
-        scaler = self._grp.scaler
-        state = dict(
+      state = dict(
           deter=jnp.zeros([bs, self._deter], f32),
-          logit=jnp.zeros([bs, self._stoch * self._classes // scaler, scaler], f32),
-          stoch=jnp.zeros([bs, self._stoch * self._classes // scaler, scaler], f32))
-      else:  
-        state = dict(
-            deter=jnp.zeros([bs, self._deter], f32),
-            logit=jnp.zeros([bs, self._stoch, self._classes], f32),
-            stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
+          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
+          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
     else:
       if self._equiv:
         #TODO:extend to other types of equivariance
@@ -313,7 +307,8 @@ class RSSM(nj.Module):
         flat_logits = nn.GeometricTensor(flat_logits[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch)
         logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
         logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
-        logit = jnp.concatenate(logits_list, 1)
+        sublists = [logits_list[i:i + self._classes // self._grp.scaler] for i in range(0, len(logits_list), self._classes // self._grp.scaler)]
+        logit = jnp.concatenate([jnp.concatenate(inner_list, axis=-1) for inner_list in sublists], axis=1)
         logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
