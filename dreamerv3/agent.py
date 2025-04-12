@@ -131,6 +131,11 @@ class WorldModel(nj.Module):
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
     rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
     self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
+    self.slow_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
+    self.encoder_updater = jaxutils.SlowUpdater(
+                            self.encoder, self.slow_encoder,
+                            self.config.slow_critic_fraction,
+                            self.config.slow_critic_update)
     embed_size = None
     if config.rssm.equiv:
       embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
@@ -174,10 +179,13 @@ class WorldModel(nj.Module):
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
+    self.encoder_updater()
     return state, outs, metrics
 
   def loss(self, data, state):
     embed = self.encoder(data)
+    # TODO: actually use it
+    _ = self.slow_encoder(data)
     prev_latent, prev_action = state
     prev_actions = jnp.concatenate([
         prev_action[:, None], data['action'][:, :-1]], 1)
@@ -362,6 +370,7 @@ class VFunction(nj.Module):
                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
                                      key=net_key,
                                      **self.config.critic, grp=grp, name='net')
+      # TODO: need to start with the same weights ?
       self.slow = nets.EquivMLP((), deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
                                      key=slow_key,
