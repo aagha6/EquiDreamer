@@ -307,9 +307,11 @@ class RSSM(nj.Module):
         flat_logits = nn.GeometricTensor(flat_logits[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch)
         logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
         logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
-        sublists = [logits_list[i:i + self._classes // self._grp.scaler] for i in range(0, len(logits_list), self._classes // self._grp.scaler)]
-        logit = jnp.concatenate([jnp.concatenate(inner_list, axis=-1) for inner_list in sublists], axis=1)
-        logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
+        # we use this trick to preserve the equivariance when sampling
+        logits = jnp.concatenate(logits_list, 1)
+        min_values = jax.lax.stop_gradient(jnp.min(logits, axis=2, keepdims=True))
+        logits = jnp.where(logits == min_values, logits - 1e9, logits)
+        logit = logits.reshape(x.shape[:-1] + (self._stoch, self._classes))
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
         logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
