@@ -98,10 +98,11 @@ class Agent(nj.Module):
       _, mets = self.expl_behavior.train(self.wm.imagine, start, context)
       metrics.update({'expl_' + key: value for key, value in mets.items()})
     outs = {}
-    #TODO: we pass on one of the states as a prev state
-    # to the next step, ultimately should promote invariance 
-    # to translation in the obs but not sure about this solution.
-    state = tree_map(lambda x:jnp.split(x, 2, 0)[0], state)
+    if self.config.aug.swav:
+      #TODO: we pass on one of the states as a prev state
+      # to the next step, ultimately should promote invariance 
+      # to translation in the obs but not sure about this solution.
+      state = tree_map(lambda x:jnp.split(x, 2, 0)[0], state)
     return outs, state, metrics
 
   def report(self, data):
