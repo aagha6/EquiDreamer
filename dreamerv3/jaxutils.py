@@ -515,3 +515,12 @@ def random_translate(images, max_delta=3.):
                         shape[2:], [0,1], jnp.ones([2]), jnp.reshape(delta, [B * T, 2]), 
                         'bilinear')
   return jnp.reshape(translated_images, shape)
+
+def l2_normalize(vectors, axis=-1, epsilon=1e-9):
+    """L2-normalizes the input vectors along the specified axis.
+    Args:
+        vectors: Input array of shape (..., D), where D is the dimension of the vectors.
+        axis: Axis along which to normalize. Default is -1 (last axis).
+        epsilon: Small value to avoid division by zero."""
+    norms = jnp.linalg.norm(vectors, axis=axis, ord=2, keepdims=True)
+    return vectors / jnp.maximum(norms, epsilon)

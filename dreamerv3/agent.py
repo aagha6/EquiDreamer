@@ -147,9 +147,18 @@ class WorldModel(nj.Module):
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
     rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
     self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
-    self.slow_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
-    self.encoder_updater = jaxutils.SlowUpdater(
-                            self.encoder, self.slow_encoder,
+
+    if config.aug.swav:
+      self._ema_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
+      self._obs_proj = nets.Linear(units=32, name='proj')
+      self._ema_obs_proj = nets.Linear(units=32, name='ema_proj')
+
+      self._encoder_updater = jaxutils.SlowUpdater(
+                            self.encoder, self._ema_encoder,
+                            self.config.slow_critic_fraction,
+                            self.config.slow_critic_update)      
+      self._proj_updater = jaxutils.SlowUpdater(
+                            self._obs_proj, self._ema_obs_proj,
                             self.config.slow_critic_fraction,
                             self.config.slow_critic_update)
     embed_size = None
@@ -195,13 +204,23 @@ class WorldModel(nj.Module):
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
-    self.encoder_updater()
+    if self.config.aug.swav:
+      self._encoder_updater()
+      self._proj_updater()
     return state, outs, metrics
+
+  def ema_proj(self, data):
+    embed = self._ema_encoder(data)
+    proj = self._ema_obs_proj(embed)
+    proj = jaxutils.l2_normalize(proj, axis=-1)
+    return proj
 
   def loss(self, data, state):
     embed = self.encoder(data)
-    # TODO: actually use it
-    _ = self.slow_encoder(data)
+    if self.config.aug.swav:
+      proj = self._obs_proj(embed)
+      proj = jaxutils.l2_normalize(proj, axis=-1)
+      ema_proj = jax.lax.stop_gradient(self.ema_proj(data))
     prev_latent, prev_action = state
     prev_actions = jnp.concatenate([
         prev_action[:, None], data['action'][:, :-1]], 1)
