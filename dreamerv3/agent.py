@@ -56,7 +56,7 @@ class Agent(nj.Module):
 
   def policy(self, obs, state, mode='train'):
     self.config.jax.jit and print('Tracing policy function.')
-    obs = self.preprocess(obs)
+    obs = self.preprocess(obs, aug=False)
     (prev_latent, prev_action), task_state, expl_state = state
     embed = self.wm.encoder(obs)
     latent, _ = self.wm.rssm.obs_step(
@@ -82,7 +82,12 @@ class Agent(nj.Module):
   def train(self, data, state):
     self.config.jax.jit and print('Tracing train function.')
     metrics = {}
-    data = self.preprocess(data)
+    data = self.preprocess(data, aug=self.config.aug.swav)
+    if self.config.aug.swav:
+      prev_latent, prev_action = state
+      prev_latent = {k: jnp.concat([v, v], axis=0) for k, v in prev_latent.items()}
+      prev_action = jnp.concat([prev_action, prev_action], axis=0)
+      state = (prev_latent, prev_action)
     state, wm_outs, mets = self.wm.train(data, state)
     metrics.update(mets)
     context = {**data, **wm_outs['post']}
@@ -93,6 +98,10 @@ class Agent(nj.Module):
       _, mets = self.expl_behavior.train(self.wm.imagine, start, context)
       metrics.update({'expl_' + key: value for key, value in mets.items()})
     outs = {}
+    #TODO: we pass on one of the states as a prev state
+    # to the next step, ultimately should promote invariance 
+    # to translation in the obs but not sure about this solution.
+    state = tree_map(lambda x:jnp.split(x, 2, 0)[0], state)
     return outs, state, metrics
 
   def report(self, data):
@@ -107,7 +116,7 @@ class Agent(nj.Module):
       report.update({f'expl_{k}': v for k, v in mets.items()})
     return report
 
-  def preprocess(self, obs):
+  def preprocess(self, obs, aug=False):
     obs = obs.copy()
     for key, value in obs.items():
       if key.startswith('log_') or key in ('key',):
@@ -118,6 +127,12 @@ class Agent(nj.Module):
         value = value.astype(jnp.float32)
       obs[key] = value
     obs['cont'] = 1.0 - obs['is_terminal'].astype(jnp.float32)
+    # data augmentation
+    if aug:
+      obs = {k: jnp.concat([v, v], axis=0) for k, v in obs.items()}
+      obs['image'] = jaxutils.random_translate(
+          obs['image'],
+          self.config.aug.max_delta)
     return obs
 
 

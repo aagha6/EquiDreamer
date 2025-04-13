@@ -499,3 +499,19 @@ class GroupHelper():
           self.num_rotations = 1
         else:
           raise ValueError("Group not indentified")
+
+def random_translate(images, max_delta=3.):
+  shape = images.shape
+  assert len(shape) == 5
+  B, T = shape[:2]
+
+  delta = jax.random.uniform(nj.rng(), [B, 1, 2],
+                              minval=-max_delta, 
+                              maxval=max_delta)
+  delta = jnp.repeat(delta, repeats=T, axis=1)
+  #TODO: unfortunately doesn't fill the missing pixels, not sure yet how to solve this
+  translated_images = jax.vmap(jax.image.scale_and_translate, (0, None, None, None, 0, None))(
+                        jnp.reshape(images, [B * T] + list(shape[2:])), 
+                        shape[2:], [0,1], jnp.ones([2]), jnp.reshape(delta, [B * T, 2]), 
+                        'bilinear')
+  return jnp.reshape(translated_images, shape)
