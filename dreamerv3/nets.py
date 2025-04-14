@@ -21,7 +21,7 @@ econv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
 class RSSM(nj.Module):
 
   def __init__(
-      self, key, act_dim, grp, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, act_dim, grp, num_prototypes=2500, proto=32, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, embed_size=None, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -33,6 +33,11 @@ class RSSM(nj.Module):
     self.conv_gru = conv_gru
     self._kw = kw
     self._act_dim = act_dim
+    self._num_prototypes = num_prototypes
+    self._proto = proto
+    self._warm_up = 1
+    self._temperature = 0.1
+    self._inputs = Input(['stoch', 'deter'], dims='deter')
 
     self._equiv=equiv
     if self.conv_gru and self._equiv:
@@ -339,6 +344,63 @@ class RSSM(nj.Module):
 
   def _mask(self, value, mask):
     return jnp.einsum('b...,b->b...', value, mask.astype(value.dtype))
+
+  def proto_loss(self, post, obs_proj, ema_proj):
+    prototypes = self.get('prototypes', 
+                          Initializer('unit_normal'), (self._num_prototypes, self._proto))
+    prototypes = jaxutils.l2_normalize(prototypes, axis=-1)
+    prototypes = self.put('prototypes', prototypes)
+    
+    obs_norm = jnp.linalg.norm(obs_proj, axis=-1, ord=2)
+    obs_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
+
+    B, T = obs_proj.shape[:2]
+    obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
+    obs_scores = jnp.linalg.matmul(prototypes, obs_proj.T)
+    obs_scores = jnp.reshape(obs_scores, [self._num_prototypes, B, T])
+    obs_scores = obs_scores[:, :, self._warm_up:]
+    obs_logits = jax.nn.log_softmax(obs_scores / self._temperature, axis=0)
+    obs_logits_1, obs_logits_2 = jnp.split(obs_logits, 2, axis=1)
+
+    ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
+    ema_scores = jnp.linalg.matmul(prototypes, ema_proj.T)
+    ema_scores = jnp.reshape(ema_scores, [self._num_prototypes, B, T])
+    ema_scores = ema_scores[:, :, self._warm_up:]
+    ema_scores_1, ema_scores_2 = jnp.split(ema_scores, 2, axis=1)
+    #ema_targets_1 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_1))
+    #ema_targets_2 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_2))
+    ema_targets_1 = jax.lax.stop_gradient(ema_scores_1)
+    ema_targets_2 = jax.lax.stop_gradient(ema_scores_2)
+    ema_targets = jnp.concat([ema_targets_1, ema_targets_2], axis=1)
+
+    feat = self._inputs(post)
+    feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
+    feat_norm = jnp.linalg.norm(feat_proj, axis=-1, ord=2)
+    feat_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
+
+    feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
+    feat_scores = jnp.linalg.matmul(prototypes, feat_proj.T)
+    feat_scores = jnp.reshape(feat_scores, [self._num_prototypes, B, T])
+    feat_scores = feat_scores[:, :, self._warm_up:]
+    feat_logits = jax.nn.log_softmax(feat_scores / self._temperature, axis=0)
+
+    swav_loss = (
+        -0.5 * jnp.mean(
+            jnp.sum(ema_targets_2 * obs_logits_1, axis=0))
+        -0.5 * jnp.mean(
+            jnp.sum(ema_targets_1 * obs_logits_2, axis=0)))
+    temp_loss = (
+        -jnp.mean(
+            jnp.sum(ema_targets * feat_logits, axis=0)))
+    norm_loss = (
+        +1.0 * jnp.mean(jnp.square(obs_norm - 1)) + 1.0 * jnp.mean(jnp.square(feat_norm - 1)))
+
+    losses = {
+        'swav': swav_loss,
+        'temp': temp_loss,
+        'norm': norm_loss,
+    }
+    return losses
 
   def dyn_loss(self, post, prior, impl='kl', free=1.0):
     if impl == 'kl':
@@ -1184,6 +1246,8 @@ class Initializer:
       limit = np.sqrt(3 * scale)
       value = jax.random.uniform(
           nj.rng(), shape, f32, -limit, limit)
+    elif self.dist == 'unit_normal':
+      value = jax.random.normal(nj.rng(), shape, f32)
     elif self.dist == 'normal':
       fanin, fanout = self._fans(shape)
       denoms = {'avg': np.mean((fanin, fanout)), 'in': fanin, 'out': fanout}

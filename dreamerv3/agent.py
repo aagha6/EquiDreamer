@@ -150,8 +150,8 @@ class WorldModel(nj.Module):
 
     if config.aug.swav:
       self._ema_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
-      self._obs_proj = nets.Linear(units=32, name='proj')
-      self._ema_obs_proj = nets.Linear(units=32, name='ema_proj')
+      self._obs_proj = nets.Linear(units=config.rssm.proto, name='proj')
+      self._ema_obs_proj = nets.Linear(units=config.rssm.proto, name='ema_proj')
 
       self._encoder_updater = jaxutils.SlowUpdater(
                             self.encoder, self._ema_encoder,
@@ -166,11 +166,11 @@ class WorldModel(nj.Module):
       embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
     self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
                           embed_size=embed_size, name='rssm')
-    self.heads = {
-        'decoder': nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-                                     **config.decoder, 
-                                      grp=grp, name='dec')}
+    self.heads = {}
+    if not config.aug.swav:
+      self.heads['decoder'] = nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
+                                        stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                        **config.decoder, grp=grp, name='dec')
     if config.reward_head['equiv']:
       self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
@@ -190,8 +190,9 @@ class WorldModel(nj.Module):
     self.opt = jaxutils.Optimizer(name='model_opt', **config.model_opt)
     scales = self.config.loss_scales.copy()
     image, vector = scales.pop('image'), scales.pop('vector')
-    scales.update({k: image for k in self.heads['decoder'].cnn_shapes})
-    scales.update({k: vector for k in self.heads['decoder'].mlp_shapes})
+    if 'decoder' in self.heads.keys():
+      scales.update({k: image for k in self.heads['decoder'].cnn_shapes})
+      scales.update({k: vector for k in self.heads['decoder'].mlp_shapes})
     self.scales = scales
 
   def initial(self, batch_size):
@@ -218,8 +219,7 @@ class WorldModel(nj.Module):
   def loss(self, data, state):
     embed = self.encoder(data)
     if self.config.aug.swav:
-      proj = self._obs_proj(embed)
-      proj = jaxutils.l2_normalize(proj, axis=-1)
+      obs_proj = self._obs_proj(embed)
       ema_proj = jax.lax.stop_gradient(self.ema_proj(data))
     prev_latent, prev_action = state
     prev_actions = jnp.concatenate([
@@ -233,6 +233,8 @@ class WorldModel(nj.Module):
       out = out if isinstance(out, dict) else {name: out}
       dists.update(out)
     losses = {}
+    if self.config.aug.swav:
+      losses = self.rssm.proto_loss(post=post, obs_proj=obs_proj, ema_proj=ema_proj)
     losses['dyn'] = self.rssm.dyn_loss(post, prior, **self.config.dyn_loss)
     losses['rep'] = self.rssm.rep_loss(post, prior, **self.config.rep_loss)
     for key, dist in dists.items():
@@ -276,15 +278,16 @@ class WorldModel(nj.Module):
         self.encoder(data)[:6, :5], data['action'][:6, :5],
         data['is_first'][:6, :5])
     start = {k: v[:, -1] for k, v in context.items()}
-    recon = self.heads['decoder'](context)
-    openl = self.heads['decoder'](
-        self.rssm.imagine(data['action'][:6, 5:], start))
-    for key in self.heads['decoder'].cnn_shapes.keys():
-      truth = data[key][:6].astype(jnp.float32)
-      model = jnp.concatenate([recon[key].mode()[:, :5], openl[key].mode()], 1)
-      error = (model - truth + 1) / 2
-      video = jnp.concatenate([truth, model, error], 2)
-      report[f'openl_{key}'] = jaxutils.video_grid(video)
+    if 'decoder' in self.heads:
+      recon = self.heads['decoder'](context)
+      openl = self.heads['decoder'](
+          self.rssm.imagine(data['action'][:6, 5:], start))
+      for key in self.heads['decoder'].cnn_shapes.keys():
+        truth = data[key][:6].astype(jnp.float32)      
+        model = jnp.concatenate([recon[key].mode()[:, :5], openl[key].mode()], 1)
+        error = (model - truth + 1) / 2
+        video = jnp.concatenate([truth, model, error], 2)
+        report[f'openl_{key}'] = jaxutils.video_grid(video)
     return report
 
   def _metrics(self, data, dists, post, prior, losses, model_loss):
