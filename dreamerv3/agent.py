@@ -150,7 +150,7 @@ class WorldModel(nj.Module):
 
     if config.aug.swav:
       self._ema_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
-      self._obs_proj = nets.Linear(units=config.rssm.proto, name='proj')
+      self._obs_proj = nets.Linear(units=config.rssm.proto, name='obs_proj')
       self._ema_obs_proj = nets.Linear(units=config.rssm.proto, name='ema_proj')
 
       self._encoder_updater = jaxutils.SlowUpdater(
@@ -201,7 +201,7 @@ class WorldModel(nj.Module):
     return prev_latent, prev_action
 
   def train(self, data, state):
-    modules = [self.encoder, self.rssm, *self.heads.values()]
+    modules = [self.encoder, self.rssm, *self.heads.values(), self._obs_proj]
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
@@ -218,9 +218,6 @@ class WorldModel(nj.Module):
 
   def loss(self, data, state):
     embed = self.encoder(data)
-    if self.config.aug.swav:
-      obs_proj = self._obs_proj(embed)
-      ema_proj = jax.lax.stop_gradient(self.ema_proj(data))
     prev_latent, prev_action = state
     prev_actions = jnp.concatenate([
         prev_action[:, None], data['action'][:, :-1]], 1)
@@ -234,6 +231,8 @@ class WorldModel(nj.Module):
       dists.update(out)
     losses = {}
     if self.config.aug.swav:
+      obs_proj = self._obs_proj(embed)
+      ema_proj = self.ema_proj(data)
       losses = self.rssm.proto_loss(post=post, obs_proj=obs_proj, ema_proj=ema_proj)
     losses['dyn'] = self.rssm.dyn_loss(post, prior, **self.config.dyn_loss)
     losses['rep'] = self.rssm.rep_loss(post, prior, **self.config.rep_loss)
