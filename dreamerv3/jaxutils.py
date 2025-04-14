@@ -403,6 +403,14 @@ class Optimizer(nj.Module):
       metrics[f'{self.name}_grad_scale'] = self.grad_scale.read()
       metrics[f'{self.name}_grad_overflow'] = (~finite).astype(jnp.float32)
     optstate = self.get('state', self.opt.init, params)
+    # XXX: this is a hack to freeze prototypes early in training
+    if 'agent/wm/rssm/prototypes' in grads.keys():
+      grads['agent/wm/rssm/prototypes'] = jax.lax.cond(
+            self.step.read() < int(1e4),
+            lambda _: grads['agent/wm/rssm/prototypes'] * 0.0,
+            lambda _: grads['agent/wm/rssm/prototypes'],
+            operand=None
+        )
     updates, optstate = self.opt.update(grads, optstate, params)
     self.put('state', optstate)
     nj.context().update(optax.apply_updates(params, updates))
