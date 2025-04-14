@@ -37,6 +37,8 @@ class RSSM(nj.Module):
     self._proto = proto
     self._warm_up = 1
     self._temperature = 0.1
+    self._sinkhorn_eps = 0.05
+    self._sinkhorn_iters = 3
     self._inputs = Input(['stoch', 'deter'], dims='deter')
 
     self._equiv=equiv
@@ -345,6 +347,13 @@ class RSSM(nj.Module):
   def _mask(self, value, mask):
     return jnp.einsum('b...,b->b...', value, mask.astype(value.dtype))
 
+  def unimix(self, logits):
+    probs = jax.nn.softmax(logits / self._sinkhorn_eps, 0)
+    uniform = jnp.ones_like(probs) / probs.shape[0]
+    probs = (1 - self._unimix) * probs + self._unimix * uniform
+    out = jnp.log(probs)
+    return out
+  
   def proto_loss(self, post, obs_proj, ema_proj):
     prototypes = self.get('prototypes', 
                           Initializer('unit_normal'), (self._num_prototypes, self._proto))
@@ -367,10 +376,9 @@ class RSSM(nj.Module):
     ema_scores = jnp.reshape(ema_scores, [self._num_prototypes, B, T])
     ema_scores = ema_scores[:, :, self._warm_up:]
     ema_scores_1, ema_scores_2 = jnp.split(ema_scores, 2, axis=1)
-    #ema_targets_1 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_1))
-    #ema_targets_2 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_2))
-    ema_targets_1 = jax.lax.stop_gradient(ema_scores_1)
-    ema_targets_2 = jax.lax.stop_gradient(ema_scores_2)
+
+    ema_targets_1 = jax.lax.stop_gradient(self.unimix(ema_scores_1))
+    ema_targets_2 = jax.lax.stop_gradient(self.unimix(ema_scores_2))
     ema_targets = jnp.concat([ema_targets_1, ema_targets_2], axis=1)
 
     feat = self._inputs(post)
