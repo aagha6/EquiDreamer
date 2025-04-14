@@ -201,7 +201,9 @@ class WorldModel(nj.Module):
     return prev_latent, prev_action
 
   def train(self, data, state):
-    modules = [self.encoder, self.rssm, *self.heads.values(), self._obs_proj]
+    modules = [self.encoder, self.rssm, *self.heads.values()]
+    if self.config.aug.swav:
+      modules += [self._obs_proj]
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
