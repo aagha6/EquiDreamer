@@ -21,7 +21,7 @@ econv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
 class RSSM(nj.Module):
 
   def __init__(
-      self, key, act_dim, grp, num_prototypes=2500, proto=32, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      self, key, act_dim, grp, num_prototypes=1024, proto=32, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
       unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, embed_size=None, **kw):
     self._deter = deter
     self._stoch = stoch
@@ -347,13 +347,22 @@ class RSSM(nj.Module):
   def _mask(self, value, mask):
     return jnp.einsum('b...,b->b...', value, mask.astype(value.dtype))
 
-  def unimix(self, logits):
-    probs = jax.nn.softmax(logits / self._sinkhorn_eps, 0)
-    uniform = jnp.ones_like(probs) / probs.shape[0]
-    probs = (1 - self._unimix) * probs + self._unimix * uniform
-    out = jnp.log(probs)
-    return out
-  
+  def sinkhorn(self, scores):
+    shape = scores.shape
+    K = shape[0]
+    scores = jnp.reshape(scores, [-1])
+    log_Q = jax.nn.log_softmax(scores / self._sinkhorn_eps, axis=0)
+    log_Q = jnp.reshape(log_Q, [K, -1])
+    N = log_Q.shape[1]
+    for _ in range(self._sinkhorn_iters):
+      log_row_sums = jax.scipy.special.logsumexp(log_Q, axis=1, keepdims=True)
+      log_Q = log_Q - log_row_sums - jnp.log(K)
+      log_col_sums = jax.scipy.special.logsumexp(log_Q, axis=0, keepdims=True)
+      log_Q = log_Q - log_col_sums - jnp.log(N)
+    log_Q = log_Q + jnp.log(N)
+    Q = jnp.exp(log_Q)
+    return jnp.reshape(Q, shape)
+
   def proto_loss(self, post, obs_proj, ema_proj):
     prototypes = self.get('prototypes', 
                           Initializer('unit_normal'), (self._num_prototypes, self._proto))
@@ -377,8 +386,8 @@ class RSSM(nj.Module):
     ema_scores = ema_scores[:, :, self._warm_up:]
     ema_scores_1, ema_scores_2 = jnp.split(ema_scores, 2, axis=1)
 
-    ema_targets_1 = jax.lax.stop_gradient(self.unimix(ema_scores_1))
-    ema_targets_2 = jax.lax.stop_gradient(self.unimix(ema_scores_2))
+    ema_targets_1 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_1))
+    ema_targets_2 = jax.lax.stop_gradient(self.sinkhorn(ema_scores_2))
     ema_targets = jnp.concat([ema_targets_1, ema_targets_2], axis=1)
 
     feat = self._inputs(post)
