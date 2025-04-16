@@ -165,7 +165,7 @@ class WorldModel(nj.Module):
     if config.rssm.equiv:
       embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
     self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
-                          embed_size=embed_size, name='rssm')
+                          embed_size=embed_size, num_prototypes=config.batch_size * config.batch_length, name='rssm')
     self.heads = {}
     if not config.aug.swav:
       self.heads['decoder'] = nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
