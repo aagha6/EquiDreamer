@@ -377,7 +377,7 @@ class RSSM(nj.Module):
     _ = self._prototypes(jnp.zeros([1, self._proto]))
 
     key, value = next(iter(self.getm('prototypes').items()))
-    prototypes = jaxutils.l2_normalize(value, axis=-1)
+    prototypes = jaxutils.l2_normalize(value, axis=0)
     self._prototypes.putm({key: prototypes})
 
     if self._equiv:
