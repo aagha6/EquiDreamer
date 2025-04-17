@@ -17,7 +17,8 @@ from . import ninjax as nj
 cast = jaxutils.cast_to_compute
 eqx_conv = functools.partial(nj.ESCNNModule, eqx.nn.Conv2d)
 econv_module = functools.partial(nj.ESCNNModule, nn.R2Conv)
-  
+pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
+
 class RSSM(nj.Module):
 
   def __init__(
@@ -81,8 +82,14 @@ class RSSM(nj.Module):
     #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(gspace, 
                                             (deter + self.embed_size) * [gspace.regular_repr])
-    
-    img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key = jax.random.split(key, 5)
+    img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
+    if self._num_prototypes:
+      self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
+      self._field_type_proto  = nn.FieldType(gspace, self._proto * [gspace.regular_repr])
+      self._proto_group_pooling = pooling_module(self._field_type_proto, name='proto_group_pooling')      
+      self.init_feat_proj = nn.R2Conv(in_type=self._field_type_feat_proj,
+                                    out_type=self._field_type_proto,
+                                    kernel_size=1, key=feat_proj_key)
     self.init_img_in = nn.R2Conv(in_type=self._field_type_img_in,
                                     out_type=self._field_type_embed,
                                     kernel_size=1, key=img_in_key)
@@ -368,6 +375,11 @@ class RSSM(nj.Module):
                           Initializer('unit_normal'), (self._num_prototypes, self._proto))
     prototypes = jaxutils.l2_normalize(prototypes, axis=-1)
     prototypes = self.put('prototypes', prototypes)
+    if self._equiv:
+      #XXX: we use grouppooling to make it invariant.
+      obs_proj = nn.GeometricTensor(obs_proj.reshape([-1] + list(obs_proj.shape[2:]))[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      obs_proj = self._proto_group_pooling(obs_proj)
+      obs_proj = obs_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
     
     obs_norm = jnp.linalg.norm(obs_proj, axis=-1, ord=2)
     obs_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
@@ -380,6 +392,13 @@ class RSSM(nj.Module):
     obs_logits = jax.nn.log_softmax(obs_scores / self._temperature, axis=0)
     obs_logits_1, obs_logits_2 = jnp.split(obs_logits, 2, axis=1)
 
+    if self._equiv:
+      #XXX: we use grouppooling to make it invariant.
+      ema_proj = nn.GeometricTensor(ema_proj.reshape([-1] + list(ema_proj.shape[2:]))[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      ema_proj = self._proto_group_pooling(ema_proj)
+      ema_proj = ema_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
+
+    ema_proj = jaxutils.l2_normalize(ema_proj, axis=-1)
     ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
     ema_scores = jnp.linalg.matmul(prototypes, ema_proj.T)
     ema_scores = jnp.reshape(ema_scores, [self._num_prototypes, B, T])
@@ -391,7 +410,19 @@ class RSSM(nj.Module):
     ema_targets = jnp.concat([ema_targets_1, ema_targets_2], axis=1)
 
     feat = self._inputs(post)
-    feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
+    if self._equiv:
+      feat_proj = self.get('feat_proj', 
+                  EquivLinear, 
+                  **{"net":self.init_feat_proj, 
+                  'in_type':self._field_type_feat_proj,
+                  'out_type':self._field_type_proto,
+                  'norm':'none',
+                  'act':'none'})(feat.reshape([-1] + list(feat.shape[2:])))
+      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      feat_proj = self._proto_group_pooling(feat_proj)
+      feat_proj = feat_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
+    else:
+      feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
     feat_norm = jnp.linalg.norm(feat_proj, axis=-1, ord=2)
     feat_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
 
@@ -890,7 +921,6 @@ class EquivMLP(MLP):
                        inputs=inputs, dims=dims, 
                        symlog_inputs=symlog_inputs, **kw)
     
-      pooling_module = functools.partial(nj.ESCNNModule, nn.GroupPooling)
       r2_act = grp.grp_act    
       units = units // grp.scaler
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])

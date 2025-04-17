@@ -2,6 +2,7 @@ import embodied
 import jax
 import jax.numpy as jnp
 import ruamel.yaml as yaml
+import escnn_jax.nn as nn
 import escnn_jax.gspaces as gspaces
 tree_map = jax.tree_util.tree_map
 sg = lambda x: tree_map(jax.lax.stop_gradient, x)
@@ -145,13 +146,37 @@ class WorldModel(nj.Module):
     self.config = config
     shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
     shapes = {k: v for k, v in shapes.items() if not k.startswith('log_')}
-    rssm_key, encoder_key, decoder_key, reward_key, cont_key  = jax.random.split(key, 5)
+    rssm_key, encoder_key, decoder_key, reward_key, cont_key, obs_proj_key, slow_obs_proj_key = jax.random.split(key, 7)
     self.encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='enc')
 
+    embed_size = None
+    if config.rssm.equiv:
+      embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
+    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
+                          embed_size=embed_size, name='rssm',
+                          num_prototypes=config.batch_size * config.batch_length if config.aug.swav else None)
     if config.aug.swav:
       self._ema_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
-      self._obs_proj = nets.Linear(units=config.rssm.proto, name='obs_proj')
-      self._ema_obs_proj = nets.Linear(units=config.rssm.proto, name='ema_proj')
+      if config.rssm.equiv:
+        gspace = grp.grp_act
+        field_type_proj_in  = nn.FieldType(gspace, embed_size * [gspace.regular_repr])
+        field_type_proj_out  = nn.FieldType(gspace, config.rssm.proto * [gspace.regular_repr])
+
+        obs_proj_net = nn.R2Conv(in_type=field_type_proj_in,
+                                    out_type=field_type_proj_out,
+                                    kernel_size=1, key=obs_proj_key)
+        slow_obs_proj_net = nn.R2Conv(in_type=field_type_proj_in,
+                                    out_type=field_type_proj_out,
+                                    kernel_size=1, key=slow_obs_proj_key)
+        self._obs_proj = nets.EquivLinear(net=obs_proj_net, 
+                  in_type=field_type_proj_in, out_type=field_type_proj_out,
+                  norm='none', act='none', name='obs_proj')
+        self._ema_obs_proj = nets.EquivLinear(net=slow_obs_proj_net, 
+                  in_type=field_type_proj_in, out_type=field_type_proj_out,
+                  norm='none', act='none', name='ema_proj')
+      else:
+        self._obs_proj = nets.Linear(units=config.rssm.proto, name='obs_proj')
+        self._ema_obs_proj = nets.Linear(units=config.rssm.proto, name='ema_proj')
 
       self._encoder_updater = jaxutils.SlowUpdater(
                             self.encoder, self._ema_encoder,
@@ -161,11 +186,6 @@ class WorldModel(nj.Module):
                             self._obs_proj, self._ema_obs_proj,
                             self.config.slow_critic_fraction,
                             self.config.slow_critic_update)
-    embed_size = None
-    if config.rssm.equiv:
-      embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
-    self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
-                          embed_size=embed_size, num_prototypes=config.batch_size * config.batch_length, name='rssm')
     self.heads = {}
     if not config.aug.swav:
       self.heads['decoder'] = nets.MultiDecoder(shapes, decoder_key, deter=config.rssm['deter'], 
@@ -214,8 +234,11 @@ class WorldModel(nj.Module):
 
   def ema_proj(self, data):
     embed = self._ema_encoder(data)
-    proj = self._ema_obs_proj(embed)
-    proj = jaxutils.l2_normalize(proj, axis=-1)
+    if self.rssm._equiv:
+      proj = self._ema_obs_proj(embed.reshape([-1] + list(embed.shape[2:])))
+      proj = proj.reshape(embed.shape[:2] + (-1,))
+    else:
+      proj = self._ema_obs_proj(embed)
     return proj
 
   def loss(self, data, state):
@@ -233,7 +256,11 @@ class WorldModel(nj.Module):
       dists.update(out)
     losses = {}
     if self.config.aug.swav:
-      obs_proj = self._obs_proj(embed)
+      if self.rssm._equiv:
+        obs_proj = self._obs_proj(embed.reshape([-1] + list(embed.shape[2:])))
+        obs_proj = obs_proj.reshape(embed.shape[:2] + (-1,))
+      else:
+        obs_proj = self._obs_proj(embed)
       ema_proj = self.ema_proj(data)
       losses = self.rssm.proto_loss(post=post, obs_proj=obs_proj, ema_proj=ema_proj)
     losses['dyn'] = self.rssm.dyn_loss(post, prior, **self.config.dyn_loss)
