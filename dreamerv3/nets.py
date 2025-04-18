@@ -51,7 +51,7 @@ class RSSM(nj.Module):
       self._grp = grp
       self.init_equiv_nets(key)
     
-    self._prototypes = Linear(units=self._num_prototypes, bias=False, name='prototypes', winit='unit_normal')
+    self._prototypes = Linear(units=self._num_prototypes, bias=False, name='prototypes')
 
   def init_equiv_nets(self, key):    
     stoch = self._stoch // self._grp.scaler
