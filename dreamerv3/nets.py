@@ -375,33 +375,34 @@ class RSSM(nj.Module):
                           Initializer('unit_normal'), (self._num_prototypes, self._proto))
     prototypes = jaxutils.l2_normalize(prototypes, axis=-1)
     prototypes = self.put('prototypes', prototypes)
-    if self._equiv:
-      #XXX: we use grouppooling to make it invariant.
-      obs_proj = nn.GeometricTensor(obs_proj.reshape([-1] + list(obs_proj.shape[2:]))[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      obs_proj = self._proto_group_pooling(obs_proj)
-      obs_proj = obs_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
     
     obs_norm = jnp.linalg.norm(obs_proj, axis=-1, ord=2)
     obs_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
 
     B, T = obs_proj.shape[:2]
-    obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
-    obs_scores = jnp.linalg.matmul(prototypes, obs_proj.T)
-    obs_scores = jnp.reshape(obs_scores, [self._num_prototypes, B, T])
+    if self._equiv:
+      obs_proj = jnp.reshape(obs_proj, [B*T, -1])
+      obs_proj = nn.GeometricTensor(obs_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      obs_scores = jaxutils.get_equiv_scores(obs_proj, prototypes)
+      obs_scores = jnp.reshape(obs_scores, [self._num_prototypes * self._grp.scaler, B, T])
+    else:
+      obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
+      obs_scores = jnp.linalg.matmul(prototypes, obs_proj.T)
+      obs_scores = jnp.reshape(obs_scores, [self._num_prototypes, B, T])
     obs_scores = obs_scores[:, :, self._warm_up:]
     obs_logits = jax.nn.log_softmax(obs_scores / self._temperature, axis=0)
     obs_logits_1, obs_logits_2 = jnp.split(obs_logits, 2, axis=1)
 
-    if self._equiv:
-      #XXX: we use grouppooling to make it invariant.
-      ema_proj = nn.GeometricTensor(ema_proj.reshape([-1] + list(ema_proj.shape[2:]))[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      ema_proj = self._proto_group_pooling(ema_proj)
-      ema_proj = ema_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
-
     ema_proj = jaxutils.l2_normalize(ema_proj, axis=-1)
-    ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
-    ema_scores = jnp.linalg.matmul(prototypes, ema_proj.T)
-    ema_scores = jnp.reshape(ema_scores, [self._num_prototypes, B, T])
+    if self._equiv:
+      ema_proj = jnp.reshape(ema_proj, [B*T, -1])
+      ema_proj = nn.GeometricTensor(ema_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      ema_scores = jaxutils.get_equiv_scores(ema_proj, prototypes)
+      ema_scores = jnp.reshape(ema_scores, [self._num_prototypes * self._grp.scaler, B, T])
+    else:
+      ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
+      ema_scores = jnp.linalg.matmul(prototypes, ema_proj.T)
+      ema_scores = jnp.reshape(ema_scores, [self._num_prototypes, B, T])
     ema_scores = ema_scores[:, :, self._warm_up:]
     ema_scores_1, ema_scores_2 = jnp.split(ema_scores, 2, axis=1)
 
@@ -419,16 +420,21 @@ class RSSM(nj.Module):
                   'norm':'none',
                   'act':'none'})(feat.reshape([-1] + list(feat.shape[2:])))
       feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      feat_proj = self._proto_group_pooling(feat_proj)
       feat_proj = feat_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
     feat_norm = jnp.linalg.norm(feat_proj, axis=-1, ord=2)
     feat_proj = jaxutils.l2_normalize(feat_proj, axis=-1)
 
-    feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
-    feat_scores = jnp.linalg.matmul(prototypes, feat_proj.T)
-    feat_scores = jnp.reshape(feat_scores, [self._num_prototypes, B, T])
+    if self._equiv:
+      feat_proj = jnp.reshape(feat_proj, [B*T, -1])
+      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
+      feat_scores = jaxutils.get_equiv_scores(feat_proj, prototypes)
+      feat_scores = jnp.reshape(feat_scores, [self._num_prototypes * self._grp.scaler, B, T])
+    else:
+      feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
+      feat_scores = jnp.linalg.matmul(prototypes, feat_proj.T)
+      feat_scores = jnp.reshape(feat_scores, [self._num_prototypes, B, T])
     feat_scores = feat_scores[:, :, self._warm_up:]
     feat_logits = jax.nn.log_softmax(feat_scores / self._temperature, axis=0)
 
