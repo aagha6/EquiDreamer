@@ -430,7 +430,7 @@ class RSSM(nj.Module):
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
     feat_norm = jnp.linalg.norm(feat_proj, axis=-1, ord=2)
-    feat_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
+    feat_proj = jaxutils.l2_normalize(feat_proj, axis=-1)
 
     feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
     feat_scores = self._prototypes(feat_proj).T
