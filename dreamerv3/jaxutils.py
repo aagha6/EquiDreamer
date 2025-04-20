@@ -404,11 +404,11 @@ class Optimizer(nj.Module):
       metrics[f'{self.name}_grad_overflow'] = (~finite).astype(jnp.float32)
     optstate = self.get('state', self.opt.init, params)
     # XXX: this is a hack to freeze prototypes early in training
-    if 'agent/wm/rssm/prototypes' in grads.keys():
-      grads['agent/wm/rssm/prototypes'] = jax.lax.cond(
+    if 'agent/wm/rssm/prototypes/kernel' in grads.keys():
+      grads['agent/wm/rssm/prototypes/kernel'] = jax.lax.cond(
             self.step.read() < int(1e4),
-            lambda _: grads['agent/wm/rssm/prototypes'] * 0.0,
-            lambda _: grads['agent/wm/rssm/prototypes'],
+            lambda _: grads['agent/wm/rssm/prototypes/kernel'] * 0.0,
+            lambda _: grads['agent/wm/rssm/prototypes/kernel'],
             operand=None
         )
     updates, optstate = self.opt.update(grads, optstate, params)
@@ -532,18 +532,3 @@ def l2_normalize(vectors, axis=-1, epsilon=1e-9):
         epsilon: Small value to avoid division by zero."""
     norms = jnp.linalg.norm(vectors, axis=axis, ord=2, keepdims=True)
     return vectors / jnp.maximum(norms, epsilon)
-
-def get_equiv_scores(proj, prototypes):
-      """Computes cluster scores for each dim in the fiber dimension separately.
-      Args:
-          proj: Projections of shape (B * T, proto * grp.scaler) in regular representation.
-          prototypes: Prototypes of shape (n_prototypes, proto* grp.scaler).
-      Returns:
-          scores: Equivariance scores of shape (n_prototypes * grp.scaler, B * T).
-      """
-      proj_list = proj.split(list(range(len(proj.type)))[1:])
-      proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), proj_list)
-      proj = jnp.concatenate(proj_list,-1)
-      scores = jax.vmap(jnp.matmul, [None, 1])(prototypes, proj.T)
-      scores = scores.transpose(1, 0, 2).reshape([-1, scores.shape[-1]])
-      return scores
