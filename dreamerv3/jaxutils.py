@@ -392,7 +392,12 @@ class Optimizer(nj.Module):
     loss, params, grads, aux = nj.grad(
         wrapped, modules, has_aux=True)(*args, **kwargs)
     if not self.PARAM_COUNTS[self.path]:
-      count = sum(x.size for x in jax.tree_leaves(params))
+      count = 0
+      for k, v in params.items():
+        if isinstance(v, nn.R2Conv):
+          count += v.weights.array.size + v.bias.array.size
+        else:
+          count += sum(x.size for x in jax.tree_leaves(v))
       print(f'Optimizer {self.name} has {count:,} variables.')
       self.PARAM_COUNTS[self.path] = count
     if parallel():
