@@ -935,19 +935,10 @@ class EquivMLP(MLP):
       keys = jax.random.split(key, 7)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[0], name='s1conv')
+                            kernel_size=1, key=keys[0], name='s0conv')
       self.escnn2 = econv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[1], name='s2conv')
-      self.escnn3 = econv_module(in_type=self.feat_type_hidden, 
-                            out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[2], name='s3conv')
-      self.escnn4 = econv_module(in_type=self.feat_type_hidden, 
-                            out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[3], name='s4conv')
-      self.escnn5 = econv_module(in_type=self.feat_type_hidden, 
-                            out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[4], name='s5conv')
+                            kernel_size=1, key=keys[1], name='s1conv')
       if invariant:
         self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
         self._field_out_type = None
@@ -979,12 +970,6 @@ class EquivMLP(MLP):
     x = self.escnn1(x)
     x = self.equiv_relu(x)
     x = self.escnn2(x)
-    x = self.equiv_relu(x)
-    x = self.escnn3(x)
-    x = self.equiv_relu(x)
-    x = self.escnn4(x)
-    x = self.equiv_relu(x)
-    x = self.escnn5(x)
     x = self.equiv_relu(x)
     if self.invariant:
       x = self.group_pooling(x).tensor.mean(-1).mean(-1)
