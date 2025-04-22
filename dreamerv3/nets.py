@@ -214,6 +214,7 @@ class RSSM(nj.Module):
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
       prev_action = prev_action.reshape(shape)
     if self._equiv:
+      #TODO: adapt to other envs as well
       act = jnp.concatenate([prev_action, -prev_action], -1)
       x = jnp.concatenate([prev_stoch, act], -1)
       x = self.get('img_in', 
@@ -279,7 +280,7 @@ class RSSM(nj.Module):
     return deter, deter
 
   def _equiv_gru(self, x, deter):
-    x = jnp.concatenate([x, deter], 1) # TODO: is this equiv?
+    x = jnp.concatenate([x, deter], 1)
     gru_out = self.get('gru',
                       EquivGRUCell,
                       **{"net":self.init_gru_cell,
