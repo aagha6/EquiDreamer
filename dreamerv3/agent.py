@@ -34,8 +34,11 @@ class Agent(nj.Module):
     self.step = step
     grp = None
     if config.rssm.equiv:
-        #assert config.task == 'dmc_cartpole_swingup', 'Only DMC Cartpole Swingup task supports equivariance'
-        grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
+        assert config.task in ['dmc_cartpole_swingup', 'dmc_reacher_easy'], 'Only DMC Cartpole Swingup task supports equivariance'
+        if config.task == 'dmc_cartpole_swingup':
+          grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
+        elif 'reacher' in config.task:
+          grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
     wm_key, beh_key  = jax.random.split(key, 2)
     self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=wm_key)
     self.task_behavior = getattr(behaviors, config.task_behavior)(
@@ -151,7 +154,7 @@ class WorldModel(nj.Module):
 
     embed_size = None
     if config.rssm.equiv:
-      embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
+      embed_size = config.encoder.cnn_depth // 2  * (2 ** 4) * 6
     if config.rssm.equiv:
       num_prototypes = config.batch_size * config.batch_length // grp.scaler
     else:

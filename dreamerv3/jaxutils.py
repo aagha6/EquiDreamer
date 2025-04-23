@@ -501,9 +501,12 @@ class SlowUpdater:
     self.updates.write(updates + 1)
 
 class GroupHelper():
-    def __init__(self, gspace):
+    def __init__(self, gspace, n_rotations=None):
         if gspace == gspaces.flipRot2dOnR2:
-          raise ValueError("flipRot2dOnR2 not supported yet")
+          assert n_rotations is not None
+          self.grp_act = gspace(N=n_rotations)
+          self.scaler = 2 * n_rotations 
+          self.num_rotations = 1
         elif gspace == gspaces.rot2dOnR2:
           raise ValueError("rot2dOnR2 not supported yet")
         elif gspace == gspaces.flip2dOnR2:

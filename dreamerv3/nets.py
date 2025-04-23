@@ -23,7 +23,7 @@ class RSSM(nj.Module):
 
   def __init__(
       self, key, act_dim, grp, num_prototypes=1024, proto=32, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, embed_size=None, **kw):
+      unimix=0.01, action_clip=1.0, conv_gru=False, equiv=False, embed_size=None, cup_catch=False, **kw):
     self._deter = deter
     self._stoch = stoch
     self._classes = classes
@@ -41,6 +41,7 @@ class RSSM(nj.Module):
     self._sinkhorn_eps = 0.05
     self._sinkhorn_iters = 3
     self._inputs = Input(['stoch', 'deter'], dims='deter')
+    self.cup_catch = cup_catch
 
     self._equiv=equiv
     if self.conv_gru and self._equiv:
@@ -54,7 +55,7 @@ class RSSM(nj.Module):
   def init_equiv_nets(self, key):    
     stoch = self._stoch // self._grp.scaler
     deter = self._deter // self._grp.scaler
-    units = self._kw['units'] // self._grp.scaler
+    units = self._kw['units'] // 2
     classes = self._classes // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
@@ -69,15 +70,31 @@ class RSSM(nj.Module):
                                             (deter + units) * [gspace.regular_repr])
     self._field_type_gru_out  = nn.FieldType(gspace, 
                                             3 * deter * [gspace.regular_repr])
-    #TODO: will need to adapt
-    #TODO: is this correct for cpole ?
-    #TODO: make action rep more generic
+    if gspace.fibergroup.name == "C2":
+        if self.cup_catch:
+          raise ValueError("cup_catch not implemented")
+        else:
+          act_type = nn.FieldType(
+              gspace,
+              self._act_dim * [gspace.regular_repr],
+          )
+
+    elif gspace.fibergroup.name == "D2":
+        # Reacher
+        act_type = nn.FieldType(
+            gspace,
+            self._act_dim
+            * [gspace.quotient_repr((None, gspace.rotations_order))],
+        )
+    else:
+        raise NotImplementedError("only implemented for groups C2,D2")
     if self._classes:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (self._stoch * classes + self._act_dim) * [gspace.regular_repr])
+                                              (self._stoch * classes) *\
+                                              [gspace.regular_repr]) + act_type
     else:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch + self._act_dim) * [gspace.regular_repr])
+                                              (stoch) * [gspace.regular_repr]) + act_type
                                             
     #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(gspace, 
@@ -214,8 +231,12 @@ class RSSM(nj.Module):
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
       prev_action = prev_action.reshape(shape)
     if self._equiv:
-      #TODO: adapt to other envs as well
-      act = jnp.concatenate([prev_action, -prev_action], -1)
+      #TODO: cup catch
+      if self.cup_catch:
+        raise ValueError("cup_catch not implemented")
+      else:
+        #TODO: cup catch
+        act = jnp.concatenate([prev_action, -prev_action], -1)
       x = jnp.concatenate([prev_stoch, act], -1)
       x = self.get('img_in', 
                     EquivLinear, 
@@ -652,7 +673,7 @@ class ImageEncoderResnet(nj.Module):
 class EquivImageEncoder(nj.Module):
 
   def __init__(self, depth, grp, key, **kw):
-    depth = depth // grp.scaler
+    depth = depth // 2
     gspace = grp.grp_act
     self.feat_type_in  = nn.FieldType(gspace,  3*[gspace.trivial_repr])
     self.feat_type_out1  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
@@ -724,7 +745,7 @@ class EquivImageDecoder(nj.Module):
     self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
     #TODO: clean this up
-    depth = depth * minres * minres // grp.scaler
+    depth = depth * minres * minres // 2
     self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.trivial_repr])
     depth = depth // 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
@@ -929,7 +950,7 @@ class EquivMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act    
-      units = units // grp.scaler
+      units = units // 2
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 7)
@@ -955,7 +976,21 @@ class EquivMLP(MLP):
       else:
         assert isinstance(shape, tuple)
         gspace = grp.grp_act
-        self._field_out_type = nn.FieldType(gspace,  shape[0]*[r2_act.regular_repr])
+        if gspace.fibergroup.name == "C2":
+          self._field_out_type = nn.FieldType(
+                gspace,
+                shape[0] * [gspace.regular_repr],
+            )
+
+        elif gspace.fibergroup.name == "D2":
+          # Reacher
+          self._field_out_type = nn.FieldType(
+                gspace,
+                shape[0]
+                * [gspace.quotient_repr((None, gspace.rotations_order))],
+            )
+        else:
+          raise NotImplementedError("only implemented for groups C2,D2")        
         self._field_std_type = nn.FieldType(gspace,  shape[0]*[r2_act.trivial_repr])
         self._init_equiv_actor = nn.R2Conv(in_type=self.feat_type_hidden,
                                     out_type=self._field_out_type,
@@ -1091,8 +1126,9 @@ class Dist(nj.Module):
     if self._dist == 'equiv_normal':
       lo, hi = self._minstd, self._maxstd
       std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-      #TODO: make it more general to higher dimensional action spaces
-      out = out @ jnp.array([1,-1])[:,jnp.newaxis]
+      #TODO: cup catch
+      out = out.reshape(out.shape[:-1]+(-1, 2))
+      out = out @ jnp.array([1,-1])
       dist = tfd.Normal(jnp.tanh(out), std)
       dist = tfd.Independent(dist, len(self._shape))
       dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()
