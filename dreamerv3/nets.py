@@ -431,7 +431,6 @@ class RSSM(nj.Module):
     else:
       obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
 
-    ema_proj = jaxutils.l2_normalize(ema_proj, axis=-1)
     if self._equiv:
       ema_proj = jnp.reshape(ema_proj, [B*T, -1])
       ema_proj = nn.GeometricTensor(ema_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
