@@ -155,10 +155,7 @@ class WorldModel(nj.Module):
     embed_size = None
     if config.rssm.equiv:
       embed_size = config.encoder.cnn_depth // 2  * (2 ** 4) * 6
-    if config.rssm.equiv:
-      num_prototypes = config.batch_size * config.batch_length // grp.scaler
-    else:
-      num_prototypes = config.batch_size * config.batch_length
+    num_prototypes = config.batch_size * config.batch_length
     self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
                           embed_size=embed_size, name='rssm',
                           num_prototypes=num_prototypes if config.aug.swav else None)
