@@ -375,10 +375,6 @@ class RSSM(nj.Module):
       obs_norm = jnp.linalg.norm(obs_proj, axis=-1, ord=2)
       feat_norm = jnp.linalg.norm(feat_proj, axis=-1, ord=2)
 
-      obs_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
-      ema_proj = jaxutils.l2_normalize(ema_proj, axis=-1)
-      feat_proj = jaxutils.l2_normalize(feat_proj, axis=-1)
-
       obs_scores = jnp.linalg.matmul(prototypes, obs_proj.T)
       ema_scores = jnp.linalg.matmul(prototypes, ema_proj.T)
       feat_scores = jnp.linalg.matmul(prototypes, feat_proj.T)
@@ -421,6 +417,8 @@ class RSSM(nj.Module):
     prototypes = jaxutils.l2_normalize(prototypes, axis=-1)
     prototypes = self.put('prototypes', prototypes)
     
+    obs_proj = jaxutils.l2_normalize(obs_proj, axis=-1)
+    ema_proj = jaxutils.l2_normalize(ema_proj, axis=-1)
     B, T = obs_proj.shape[:2]
     if self._equiv:
       obs_proj = jnp.reshape(obs_proj, [B*T, -1])
@@ -454,6 +452,7 @@ class RSSM(nj.Module):
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
 
+    feat_proj = jaxutils.l2_normalize(feat_proj, axis=-1)    
     if self._equiv:
       feat_proj = jnp.reshape(feat_proj, [B*T, -1])
       feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
