@@ -346,7 +346,7 @@ class Optimizer(nj.Module):
 
   def __init__(
       self, lr, opt='adam', eps=1e-5, clip=100.0, warmup=0, wd=0.0,
-      wd_pattern=r'/(w|kernel)$', lateclip=0.0):
+      wd_pattern=r'/(w|kernel)$', lateclip=0.0, freeze=1e4):
     assert opt in ('adam', 'belief', 'yogi')
     assert wd_pattern[0] not in ('0', '1')
     # assert self.path not in self.PARAM_COUNTS
@@ -372,6 +372,7 @@ class Optimizer(nj.Module):
     self.opt = optax.chain(*chain)
     self.step = nj.Variable(jnp.array, 0, jnp.int32, name='step')
     self.scaling = (COMPUTE_DTYPE == jnp.float16)
+    self.freeze = freeze
     if self.scaling:
       self.opt = optax.apply_if_finite(self.opt, max_consecutive_errors=1000)
       self.grad_scale = nj.Variable(
@@ -411,7 +412,7 @@ class Optimizer(nj.Module):
     # XXX: this is a hack to freeze prototypes early in training
     if 'agent/wm/rssm/prototypes' in grads.keys():
       grads['agent/wm/rssm/prototypes'] = jax.lax.cond(
-            self.step.read() < int(1e4),
+            self.step.read() < int(self.freeze),
             lambda _: grads['agent/wm/rssm/prototypes'] * 0.0,
             lambda _: grads['agent/wm/rssm/prototypes'],
             operand=None
