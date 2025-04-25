@@ -55,7 +55,7 @@ class RSSM(nj.Module):
   def init_equiv_nets(self, key):    
     stoch = self._stoch // self._grp.scaler
     deter = self._deter // self._grp.scaler
-    units = self._kw['units'] // 2
+    units = self._kw['units'] // self._grp.scaler
     classes = self._classes // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
@@ -768,7 +768,7 @@ class EquivImageDecoder(nj.Module):
     self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
     #TODO: clean this up
-    depth = depth * minres * minres // 2
+    depth = depth * minres * minres // grp.scaler
     self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.trivial_repr])
     depth = depth // 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
@@ -973,7 +973,7 @@ class EquivMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act    
-      units = units // 2
+      units = units // grp.scaler
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 7)
