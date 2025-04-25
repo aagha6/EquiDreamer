@@ -34,7 +34,7 @@ class Agent(nj.Module):
     self.step = step
     grp = None
     if config.rssm.equiv:
-        assert config.task in ['dmc_cartpole_swingup', 'dmc_reacher_easy'], 'Only DMC Cartpole Swingup task supports equivariance'
+        assert config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_reacher_easy'], 'Only DMC Cartpole Swingup task supports equivariance'
         if config.task == 'dmc_cartpole_swingup':
           grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
         elif 'reacher' in config.task:
