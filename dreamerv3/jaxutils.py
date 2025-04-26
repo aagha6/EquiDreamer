@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import escnn_jax.nn as nn
 import escnn_jax.gspaces as gspaces
-import augmax
+
 import optax
 from tensorflow_probability.substrates import jax as tfp
 
@@ -15,7 +15,7 @@ tree_map = jax.tree_util.tree_map
 sg = lambda x: tree_map(jax.lax.stop_gradient, x)
 COMPUTE_DTYPE = jnp.float32
 
-transform = augmax.Chain(augmax.RandomCrop(64,64))
+
 def cast_to_compute(values):
   return tree_map(lambda x: x.astype(COMPUTE_DTYPE), values)
 
@@ -520,15 +520,18 @@ class GroupHelper():
 def random_translate(images, max_delta=3.):
   shape = images.shape
   assert len(shape) == 5
-  max_delta = int(max_delta)
-  images = jnp.reshape(images, (-1,) + shape[2:])
-  padded_img = jnp.pad(images, pad_width=[[0,0],
-                                          [max_delta,max_delta],
-                                          [max_delta,max_delta],
-                                          [0,0]], mode='edge')
-  keys = nj.rng()[None].repeat(padded_img.shape[0], axis=0)
-  aug_images = jax.vmap(transform)(keys, padded_img)
-  return jnp.reshape(aug_images, shape)
+  B, T = shape[:2]
+
+  delta = jax.random.uniform(nj.rng(), [B, 1, 2],
+                              minval=-max_delta, 
+                              maxval=max_delta)
+  delta = jnp.repeat(delta, repeats=T, axis=1)
+  #TODO: unfortunately doesn't fill the missing pixels, not sure yet how to solve this
+  translated_images = jax.vmap(jax.image.scale_and_translate, (0, None, None, None, 0, None))(
+                        jnp.reshape(images, [B * T] + list(shape[2:])), 
+                        shape[2:], [0,1], jnp.ones([2]), jnp.reshape(delta, [B * T, 2]), 
+                        'bilinear')
+  return jnp.reshape(translated_images, shape)
 
 def l2_normalize(vectors, axis=-1, epsilon=1e-9):
     """L2-normalizes the input vectors along the specified axis.
