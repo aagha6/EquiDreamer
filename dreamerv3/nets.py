@@ -41,7 +41,7 @@ class RSSM(nj.Module):
     self._sinkhorn_eps = 0.05
     self._sinkhorn_iters = 3
     self._inputs = Input(['stoch', 'deter'], dims='deter')
-    self.cup_catch = cup_catch
+    self._cup_catch = cup_catch
 
     self._equiv=equiv
     if self.conv_gru and self._equiv:
@@ -70,9 +70,11 @@ class RSSM(nj.Module):
                                             (deter + units) * [gspace.regular_repr])
     self._field_type_gru_out  = nn.FieldType(gspace, 
                                             3 * deter * [gspace.regular_repr])
+    self.sign_mat = None
     if gspace.fibergroup.name == "C2":
-        if self.cup_catch:
-          raise ValueError("cup_catch not implemented")
+        if self._cup_catch:
+          act_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
+          self.sign_mat = jnp.array([[1, -1, 0], [0, 0, 1]], dtype=jnp.float32)
         else:
           act_type = nn.FieldType(
               gspace,
@@ -232,8 +234,9 @@ class RSSM(nj.Module):
       prev_action = prev_action.reshape(shape)
     if self._equiv:
       #TODO: cup catch
-      if self.cup_catch:
-        raise ValueError("cup_catch not implemented")
+      if self._cup_catch:
+        assert self.sign_mat is not None
+        act = prev_action @ self.sign_mat
       else:
         #TODO: cup catch
         act = jnp.concatenate([prev_action, -prev_action], -1)
@@ -966,7 +969,7 @@ class EquivMLP(MLP):
 
   def __init__(
       self, shape, layers, units, deter, stoch, key, grp, inputs=['tensor'], dims=None,
-      symlog_inputs=False, invariant=True, **kw):
+      symlog_inputs=False, invariant=True, cup_catch=False, **kw):
 
       super().__init__(shape=shape, layers=layers, units=units, 
                        inputs=inputs, dims=dims, 
@@ -1000,11 +1003,12 @@ class EquivMLP(MLP):
         assert isinstance(shape, tuple)
         gspace = grp.grp_act
         if gspace.fibergroup.name == "C2":
-          self._field_out_type = nn.FieldType(
-                gspace,
-                shape[0] * [gspace.regular_repr],
-            )
-
+          if cup_catch:
+            self._field_out_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
+          else:
+            self._field_out_type = nn.FieldType(
+                  gspace, shape[0] * [gspace.regular_repr],
+              )
         elif gspace.fibergroup.name == "D2":
           # Reacher
           self._field_out_type = nn.FieldType(
@@ -1023,6 +1027,7 @@ class EquivMLP(MLP):
                                     kernel_size=1, key=keys[6])
       self.invariant = invariant
       self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+      self._cup_catch = cup_catch
 
   def __call__(self, inputs):
     feat = self._inputs(inputs)
@@ -1066,6 +1071,7 @@ class EquivMLP(MLP):
       self._dist['std_type'] = self._field_std_type
       self._dist['init_equiv_actor'] = self._init_equiv_actor
       self._dist['init_equiv_std'] = self._init_equiv_std
+      self._dist['cup_catch'] = self._cup_catch
     return self.get(f'dist_{name}', Dist, shape, **self._dist)(x)
 
 
@@ -1074,7 +1080,7 @@ class Dist(nj.Module):
   def __init__(
       self, shape, dist='mse', outscale=0.1, outnorm=False, minstd=1.0,
       maxstd=1.0, unimix=0.0, bins=255, in_type=None, out_type=None, 
-      std_type=None, init_equiv_std=None, init_equiv_actor=None):
+      std_type=None, init_equiv_std=None, init_equiv_actor=None, cup_catch=False):
     assert all(isinstance(dim, int) for dim in shape), shape
     self._shape = shape
     self._dist = dist
@@ -1091,6 +1097,7 @@ class Dist(nj.Module):
       self._field_std_type = std_type
       self._init_equiv_actor = init_equiv_actor
       self._init_equiv_std = init_equiv_std
+      self._cup_catch = cup_catch
 
   def __call__(self, inputs):
     dist = self.inner(inputs)
@@ -1149,9 +1156,11 @@ class Dist(nj.Module):
     if self._dist == 'equiv_normal':
       lo, hi = self._minstd, self._maxstd
       std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-      #TODO: cup catch
-      out = out.reshape(out.shape[:-1]+(-1, 2))
-      out = out @ jnp.array([1,-1])
+      if self._cup_catch:
+        out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])        
+      else:
+        out = out.reshape(out.shape[:-1]+(-1, 2))        
+        out = out @ jnp.array([1, -1])
       dist = tfd.Normal(jnp.tanh(out), std)
       dist = tfd.Independent(dist, len(self._shape))
       dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()

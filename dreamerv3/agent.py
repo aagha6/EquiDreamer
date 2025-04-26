@@ -33,16 +33,19 @@ class Agent(nj.Module):
     self.act_space = act_space['action']
     self.step = step
     grp = None
+    cup_catch = False
     if config.rssm.equiv:
-        assert config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_reacher_easy'], 'Only DMC Cartpole Swingup task supports equivariance'
-        if config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup']:
+        assert config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_reacher_easy', 'dmc_cup_catch'], 'Only DMC Cartpole Swingup task supports equivariance'
+        if config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_cup_catch']:
           grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
+          if config.task == 'dmc_cup_catch':
+            cup_catch = True
         elif 'reacher' in config.task:
           grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
     wm_key, beh_key  = jax.random.split(key, 2)
-    self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', key=wm_key)
+    self.wm = WorldModel(obs_space, act_space, config, grp=grp, name='wm', cup_catch=cup_catch, key=wm_key)
     self.task_behavior = getattr(behaviors, config.task_behavior)(
-        self.wm, self.act_space, self.config, key=beh_key, grp=grp, name='task_behavior')
+        self.wm, self.act_space, self.config, key=beh_key, grp=grp, cup_catch=cup_catch, name='task_behavior')
     if config.expl_behavior == 'None':
       self.expl_behavior = self.task_behavior
     else:
@@ -143,7 +146,7 @@ class Agent(nj.Module):
 
 class WorldModel(nj.Module):
 
-  def __init__(self, obs_space, act_space, config, key, grp=None):
+  def __init__(self, obs_space, act_space, config, key, cup_catch, grp=None):
     self.obs_space = obs_space
     self.act_space = act_space['action']
     self.config = config
@@ -157,7 +160,7 @@ class WorldModel(nj.Module):
       embed_size = config.encoder.cnn_depth // grp.scaler  * (2 ** 4) * 6
     num_prototypes = config.batch_size * config.batch_length
     self.rssm = nets.RSSM(rssm_key, self.act_space.shape[0], **config.rssm, grp=grp, 
-                          embed_size=embed_size, name='rssm',
+                          embed_size=embed_size, name='rssm', cup_catch=cup_catch,
                           num_prototypes=num_prototypes if config.aug.swav else None)
     if config.aug.swav:
       self._ema_encoder = nets.MultiEncoder(shapes, encoder_key, **config.encoder, grp=grp, name='slow_enc')
@@ -344,7 +347,7 @@ class WorldModel(nj.Module):
 
 class ImagActorCritic(nj.Module):
 
-  def __init__(self, critics, scales, act_space, config, grp, actor_key):
+  def __init__(self, critics, scales, act_space, config, grp, actor_key, cup_catch=False):
     critics = {k: v for k, v in critics.items() if scales[k]}
     for key, scale in scales.items():
       assert not scale or key in critics, key
@@ -355,10 +358,11 @@ class ImagActorCritic(nj.Module):
     disc = act_space.discrete
     self.grad = config.actor_grad_disc if disc else config.actor_grad_cont
     if config.rssm.equiv:
+      self.cup_catch = cup_catch
       self.actor = nets.EquivMLP(
         name='actor', invariant=False, deter=config.rssm['deter'], grp=grp, key=actor_key,
         stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-        shape=act_space.shape, **config.actor,
+        shape=act_space.shape, **config.actor, cup_catch=self.cup_catch,
         dist=config.actor_dist_disc if disc else config.actor_dist_cont)  
     else:
       self.actor = nets.MLP(
