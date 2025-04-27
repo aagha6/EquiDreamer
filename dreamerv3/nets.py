@@ -98,7 +98,6 @@ class RSSM(nj.Module):
       self._field_type_img_in  = nn.FieldType(gspace, 
                                               (stoch) * [gspace.regular_repr]) + act_type
                                             
-    #TODO: need to clean this up, deter+embed ?
     self._field_type_inf_in  = nn.FieldType(gspace, 
                                             (deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
@@ -233,12 +232,10 @@ class RSSM(nj.Module):
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
       prev_action = prev_action.reshape(shape)
     if self._equiv:
-      #TODO: cup catch
       if self._cup_catch:
         assert self.sign_mat is not None
         act = prev_action @ self.sign_mat
       else:
-        #TODO: cup catch
         act = jnp.concatenate([prev_action, -prev_action], -1)
       x = jnp.concatenate([prev_stoch, act], -1)
       x = self.get('img_in', 
@@ -827,7 +824,6 @@ class EquivImageDecoder(nj.Module):
     tensors = jax.tree.map(lambda x: x.tensor, tensors)
     midpoint = len(tensors) // 2
     upper, lower = tensors[:midpoint], tensors[midpoint:]
-    # TODO: is this the right axis
     lower = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-1), lower), 1)
     upper = jnp.concatenate(jax.tree.map(lambda x: jnp.moveaxis(x,1,-1), upper), 1)
     return jnp.concatenate([upper, lower], -2)
