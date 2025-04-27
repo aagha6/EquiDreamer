@@ -520,14 +520,18 @@ class GroupHelper():
 def random_translate(images, max_delta=3.):
   shape = images.shape
   assert len(shape) == 5
+  B, _ = shape[:2]
+  keys = nj.rng(B)  
   max_delta = int(max_delta)
-  images = jnp.reshape(images, (-1,) + shape[2:])
   padded_img = jnp.pad(images, pad_width=[[0,0],
+                                          [0,0],
                                           [max_delta,max_delta],
                                           [max_delta,max_delta],
                                           [0,0]], mode='edge')
-  keys = nj.rng()[None].repeat(padded_img.shape[0], axis=0)
-  aug_images = jax.vmap(transform)(keys, padded_img)
+  aug_images = jax.vmap(
+      jax.vmap(transform, in_axes=(None, 0)),  # Inner vmap over time dim `padded_img` only
+      in_axes=(0, 0)  # Outer vmap over `keys` and batch dim `padded_img`
+  )(keys, padded_img)
   return jnp.reshape(aug_images, shape)
 
 def l2_normalize(vectors, axis=-1, epsilon=1e-9):
