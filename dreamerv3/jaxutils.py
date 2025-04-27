@@ -15,7 +15,8 @@ tree_map = jax.tree_util.tree_map
 sg = lambda x: tree_map(jax.lax.stop_gradient, x)
 COMPUTE_DTYPE = jnp.float32
 
-transform = augmax.Chain(augmax.RandomCrop(64,64))
+transform = augmax.Chain(augmax.RandomBrightness(range=[-0.3, 0.3]),
+                         augmax.RandomContrast(range=[-0.3, 0.3]))
 def cast_to_compute(values):
   return tree_map(lambda x: x.astype(COMPUTE_DTYPE), values)
 
@@ -522,12 +523,8 @@ def random_translate(images, max_delta=3.):
   assert len(shape) == 5
   max_delta = int(max_delta)
   images = jnp.reshape(images, (-1,) + shape[2:])
-  padded_img = jnp.pad(images, pad_width=[[0,0],
-                                          [max_delta,max_delta],
-                                          [max_delta,max_delta],
-                                          [0,0]], mode='edge')
-  keys = nj.rng()[None].repeat(padded_img.shape[0], axis=0)
-  aug_images = jax.vmap(transform)(keys, padded_img)
+  keys = nj.rng()[None].repeat(images.shape[0], axis=0)
+  aug_images = jax.vmap(transform)(keys, images)
   return jnp.reshape(aug_images, shape)
 
 def l2_normalize(vectors, axis=-1, epsilon=1e-9):
