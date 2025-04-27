@@ -211,7 +211,7 @@ class RSSM(nj.Module):
                   'in_type':self._field_type_inf_in,
                   'out_type':self._field_type_embed,
                   'norm':self._kw['norm'],
-                  'act':'equiv_relu'})(x)
+                  'act':'equiv_silu'})(x)
     else:
       x = self.get('obs_out', Linear, **self._kw)(x)    
     stats = self._stats('obs_stats', x)
@@ -247,7 +247,7 @@ class RSSM(nj.Module):
                       'in_type':self._field_type_img_in,
                       'out_type':self._field_type_embed,
                       'norm':self._kw['norm'],
-                      'act':'equiv_relu'})(x)
+                      'act':'equiv_silu'})(x)
     else:
       x = jnp.concatenate([prev_stoch, prev_action], -1)    
       x = self.get('img_in', Linear, **self._kw)(x)
@@ -264,7 +264,7 @@ class RSSM(nj.Module):
                   'in_type':self._field_type_deter,
                   'out_type':self._field_type_embed,
                   'norm':self._kw['norm'],
-                  'act':'equiv_relu'})(x)
+                  'act':'equiv_silu'})(x)
     else:
       x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
@@ -281,7 +281,7 @@ class RSSM(nj.Module):
                   'in_type':self._field_type_deter,
                   'out_type':self._field_type_embed,
                   'norm':self._kw['norm'],
-                  'act':'equiv_relu'})(deter)
+                  'act':'equiv_silu'})(deter)
     else:
       x = self.get('img_out', Linear, **self._kw)(deter)
     stats = self._stats('img_stats', x)
@@ -719,45 +719,45 @@ class EquivImageEncoder(nj.Module):
                           out_type=self.feat_type_out1, 
                           kernel_size=3 ,stride=1,
                           key=keys[0], name='s1conv')
-    self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
+    self.equiv_silu1 = nn.SiLU(self.feat_type_out1)
     self.s1pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out1,
                         kernel_size=2, stride=2)
     self.escnn2 = econv_module(in_type=self.feat_type_out1,
                           out_type=self.feat_type_out2,
                           kernel_size=3 ,stride=2,
                           key=keys[1], name='s2conv')
-    self.equiv_relu2 = nn.ReLU(self.feat_type_out2)
+    self.equiv_silu2 = nn.SiLU(self.feat_type_out2)
     self.escnn3 = econv_module(in_type=self.feat_type_out2,
                           out_type=self.feat_type_out3,
                           kernel_size=3 ,stride=2,
                           key=keys[2], name='s3conv')
-    self.equiv_relu3 = nn.ReLU(self.feat_type_out3)
+    self.equiv_silu3 = nn.SiLU(self.feat_type_out3)
     self.escnn4 = econv_module(in_type=self.feat_type_out3, 
                           out_type=self.feat_type_out4,
                           kernel_size=3 ,stride=2,
                           key=keys[3], name='s4conv')
-    self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
+    self.equiv_silu4 = nn.SiLU(self.feat_type_out4)
     self.escnn5 = econv_module(in_type=self.feat_type_out4, 
                           out_type=self.feat_type_out5,
                           kernel_size=3 ,stride=1,
                           key=keys[4], name='s5conv')
-    self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
+    self.equiv_silu5 = nn.SiLU(self.feat_type_out5)
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
     x = jnp.moveaxis(x,-1,1)
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
-    x = self.equiv_relu1(x)
+    x = self.equiv_silu1(x)
     x = self.s1pool(x)
     x = self.escnn2(x)
-    x = self.equiv_relu2(x)
+    x = self.equiv_silu2(x)
     x = self.escnn3(x)
-    x = self.equiv_relu3(x)
+    x = self.equiv_silu3(x)
     x = self.escnn4(x)
-    x = self.equiv_relu4(x)
+    x = self.equiv_silu4(x)
     x = self.escnn5(x)
-    x = self.equiv_relu5(x)
+    x = self.equiv_silu5(x)
     x = x.tensor
     x = x.reshape((x.shape[0], -1))
     return x
@@ -790,32 +790,32 @@ class EquivImageDecoder(nj.Module):
                           out_type=self.feat_type_linear, 
                           kernel_size=1 ,stride=1,
                           key=keys[0], name='linear')
-    self.equiv_relu0 = nn.ReLU(self.feat_type_linear)
+    self.equiv_silu0 = nn.SiLU(self.feat_type_linear)
     self.escnn1 = econv_module(in_type=self.feat_type_hidden1, 
                           out_type=self.feat_type_hidden2, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=keys[1], name='s1conv')
-    self.equiv_relu1 = nn.ReLU(self.feat_type_hidden2)
+    self.equiv_silu1 = nn.SiLU(self.feat_type_hidden2)
     self.escnn2 = econv_module(in_type=self.feat_type_hidden2, 
                           out_type=self.feat_type_hidden3, 
                           kernel_size=3 ,stride=1, padding=1,
                           key=keys[2], name='s2conv')
-    self.equiv_relu2 = nn.ReLU(self.feat_type_hidden3)
+    self.equiv_silu2 = nn.SiLU(self.feat_type_hidden3)
     self.escnn3 = econv_module(in_type=self.feat_type_hidden3, 
                           out_type=self.feat_type_hidden4, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[3], name='s3conv')
-    self.equiv_relu3 = nn.ReLU(self.feat_type_hidden4)
+    self.equiv_silu3 = nn.SiLU(self.feat_type_hidden4)
     self.escnn4 = econv_module(in_type=self.feat_type_hidden4, 
                           out_type=self.feat_type_hidden5, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[4], name='s4conv')
-    self.equiv_relu4 = nn.ReLU(self.feat_type_hidden5)
+    self.equiv_silu4 = nn.SiLU(self.feat_type_hidden5)
     self.escnn5 = econv_module(in_type=self.feat_type_hidden5, 
                           out_type=self.feat_type_hidden6, 
                           kernel_size=3 ,stride=1, padding=1, 
                           key=keys[5], name='s5conv')
-    self.equiv_relu5 = nn.ReLU(self.feat_type_hidden6)
+    self.equiv_silu5 = nn.SiLU(self.feat_type_hidden6)
     self.escnn6 = econv_module(in_type=self.feat_type_hidden6, 
                           out_type=self.feat_type_out, 
                           kernel_size=3 ,stride=1, padding=1, 
@@ -838,34 +838,34 @@ class EquivImageDecoder(nj.Module):
     
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.linear(x)
-    x = self.equiv_relu0(x)
+    x = self.equiv_silu0(x)
     y = self._create_spatial_dims(x)
     x = nn.GeometricTensor(y, self.feat_type_hidden1)
     x = self.escnn1(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm1', Norm, 'escnn_layer')(x)
     x = nn.GeometricTensor(x, self.feat_type_hidden2)
-    x = self.equiv_relu1(x)
+    x = self.equiv_silu1(x)
     x = self.escnn2(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm2', Norm, 'escnn_layer')(x)
     x = nn.GeometricTensor(x, self.feat_type_hidden3)
-    x = self.equiv_relu2(x)
+    x = self.equiv_silu2(x)
     x = self.escnn3(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm3', Norm, 'escnn_layer')(x)
     x = nn.GeometricTensor(x, self.feat_type_hidden4)
-    x = self.equiv_relu3(x)
+    x = self.equiv_silu3(x)
     x = self.escnn4(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm4', Norm, 'escnn_layer')(x)
     x = nn.GeometricTensor(x, self.feat_type_hidden5)
-    x = self.equiv_relu4(x)
+    x = self.equiv_silu4(x)
     x = self.escnn5(x)
     x = jnp.repeat(jnp.repeat(x.tensor, 2, -1), 2, -2)
     x = self.get('norm5', Norm, 'escnn_layer')(x)
     x = nn.GeometricTensor(x, self.feat_type_hidden6)
-    x = self.equiv_relu5(x)
+    x = self.equiv_silu5(x)
     x = self.escnn6(x)
     x = jaxutils.cast_to_compute(x.tensor) + 0.5
     x = jnp.moveaxis(x,1,-1)
@@ -1026,7 +1026,7 @@ class EquivMLP(MLP):
                                     out_type=self._field_std_type,
                                     kernel_size=1, key=keys[6])
       self.invariant = invariant
-      self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+      self.equiv_silu = nn.SiLU(self.feat_type_hidden)
       self._cup_catch = cup_catch
 
   def __call__(self, inputs):
@@ -1040,15 +1040,15 @@ class EquivMLP(MLP):
     assert len(x.shape)==4
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_silu(x)
     x = self.escnn2(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_silu(x)
     x = self.escnn3(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_silu(x)
     x = self.escnn4(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_silu(x)
     x = self.escnn5(x)
-    x = self.equiv_relu(x)
+    x = self.equiv_silu(x)
     if self.invariant:
       x = self.group_pooling(x).tensor.mean(-1).mean(-1)
     else:
@@ -1407,9 +1407,9 @@ def get_act(name, in_type=None):
     return name
   elif name == 'none':
     return lambda x: x
-  elif name == 'equiv_relu':
+  elif name == 'equiv_silu':
     assert in_type is not None
-    return lambda x: nn.ReLU(in_type=in_type)(x)
+    return lambda x: nn.SiLU(in_type=in_type)(x)
   elif name == 'mish':
     return lambda x: x * jnp.tanh(jax.nn.softplus(x))
   elif hasattr(jax.nn, name):
