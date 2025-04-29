@@ -73,7 +73,6 @@ class RSSM(nj.Module):
     if gspace.fibergroup.name == "C2":
         if self._cup_catch:
           act_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
-          self.sign_mat = jnp.array([[1, -1, 0], [0, 0, 1]], dtype=jnp.float32)
         else:
           act_type = nn.FieldType(
               gspace,
@@ -235,8 +234,7 @@ class RSSM(nj.Module):
       prev_action = prev_action.reshape(shape)
     if self._equiv:
       if self._cup_catch:
-        assert self.sign_mat is not None
-        act = prev_action @ self.sign_mat
+        act = prev_action @ jnp.array([[1, -1, 0], [0, 0, 1]], dtype=jnp.float32)
       else:
         act = jnp.concatenate([prev_action, -prev_action], -1)
       x = jnp.concatenate([prev_stoch, act], -1)
@@ -1141,7 +1139,7 @@ class Dist(nj.Module):
       lo, hi = self._minstd, self._maxstd
       std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
       if self._cup_catch:
-        out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])        
+        out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
       else:
         out = out.reshape(out.shape[:-1]+(-1, 2))        
         out = out @ jnp.array([1, -1])
