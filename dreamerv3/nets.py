@@ -993,9 +993,6 @@ class EquivMLP(MLP):
       self.escnn4 = econv_module(in_type=self.feat_type_hidden, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[3], name='s4conv')
-      self.escnn5 = econv_module(in_type=self.feat_type_hidden, 
-                            out_type=self.feat_type_hidden, 
-                            kernel_size=1, key=keys[4], name='s5conv')
       if invariant:
         self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')
         self._field_out_type = None
@@ -1047,8 +1044,6 @@ class EquivMLP(MLP):
     x = self.escnn3(x)
     x = self.equiv_relu(x)
     x = self.escnn4(x)
-    x = self.equiv_relu(x)
-    x = self.escnn5(x)
     x = self.equiv_relu(x)
     if self.invariant:
       x = self.group_pooling(x).tensor.mean(-1).mean(-1)
