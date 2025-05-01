@@ -56,9 +56,10 @@ class RSSM(nj.Module):
     stoch = self._stoch // self._grp.scaler
     deter = self._deter // self._grp.scaler
     units = self._kw['units'] // self._grp.scaler
+    classes = self._classes // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
-      self._field_type_stoch  = nn.FieldType(gspace, stoch * self._classes * [gspace.regular_repr])
+      self._field_type_stoch  = nn.FieldType(gspace, self._stoch * classes * [gspace.regular_repr])
     else:
       self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
@@ -90,7 +91,7 @@ class RSSM(nj.Module):
         raise NotImplementedError("only implemented for groups C2,D2")
     if self._classes:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch * self._classes) *\
+                                              (self._stoch * classes) *\
                                               [gspace.regular_repr]) + act_type
     else:
       self._field_type_img_in  = nn.FieldType(gspace, 
@@ -100,10 +101,7 @@ class RSSM(nj.Module):
                                             (deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
     if self._num_prototypes:
-      if self._classes:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (stoch * self._classes + deter) * [gspace.regular_repr])
-      else:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
+      self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
       self._field_type_proto  = nn.FieldType(gspace, self._proto * [gspace.regular_repr])
       self._proto_group_pooling = pooling_module(self._field_type_proto, name='proto_group_pooling')      
       self.init_feat_proj = nn.R2Conv(in_type=self._field_type_feat_proj,
@@ -343,10 +341,9 @@ class RSSM(nj.Module):
         flat_logits = nn.GeometricTensor(flat_logits[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch)
         logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
         logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
-        logit = jnp.concatenate(logits_list, 1)
-        logit = jnp.split(logit, self._stoch // self._grp.scaler, 1)
-        logit = jax.vmap(jnp.transpose, (0, None))(jax.vmap(jnp.stack)(logit), [0,2,1])
-        logit = logit.reshape(x.shape[:-1] + (self._stoch, self._classes))
+        sublists = [logits_list[i:i + self._classes // self._grp.scaler] for i in range(0, len(logits_list), self._classes // self._grp.scaler)]
+        logit = jnp.concatenate([jnp.concatenate(inner_list, axis=-1) for inner_list in sublists], axis=1)
+        logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
         logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
