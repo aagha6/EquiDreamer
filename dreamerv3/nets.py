@@ -101,7 +101,10 @@ class RSSM(nj.Module):
                                             (deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
     if self._num_prototypes:
-      self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
+      if self._classes:
+        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch * classes + deter) * [gspace.regular_repr])
+      else:
+        self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
       self._field_type_proto  = nn.FieldType(gspace, self._proto * [gspace.regular_repr])
       self._proto_group_pooling = pooling_module(self._field_type_proto, name='proto_group_pooling')      
       self.init_feat_proj = nn.R2Conv(in_type=self._field_type_feat_proj,
