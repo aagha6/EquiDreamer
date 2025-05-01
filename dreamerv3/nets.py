@@ -55,7 +55,7 @@ class RSSM(nj.Module):
   def init_equiv_nets(self, key):    
     stoch = self._stoch // self._grp.scaler
     deter = self._deter // self._grp.scaler
-    units = self._kw['units']
+    units = self._kw['units'] // self._grp.scaler
     classes = self._classes // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
