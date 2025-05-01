@@ -218,7 +218,7 @@ class RSSM(nj.Module):
     dist = self.get_dist(stats)
     stoch = dist.sample(seed=nj.rng())
     if self._equiv and self._classes:
-        stoch = stoch.transpose([0,2,1])
+      stoch = stoch.transpose([0,2,1])
     post = {'stoch': stoch, 'deter': prior['deter'], **stats}
     return cast(post), cast(prior)
 
@@ -270,7 +270,7 @@ class RSSM(nj.Module):
     dist = self.get_dist(stats)
     stoch = dist.sample(seed=nj.rng())
     if self._equiv and self._classes:
-        stoch = stoch.transpose([0,2,1])
+      stoch = stoch.transpose([0,2,1])
     prior = {'stoch': stoch, 'deter': deter, **stats}
     return cast(prior)
 
@@ -287,7 +287,10 @@ class RSSM(nj.Module):
       x = self.get('img_out', Linear, **self._kw)(deter)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
-    return cast(dist.mode())
+    if self._equiv and self._classes:
+      return cast(dist.mode().transpose([0,2,1]))
+    else:
+      return cast(dist.mode())
 
   def _conv_gru(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
