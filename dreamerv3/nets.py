@@ -937,8 +937,11 @@ class MLP(nj.Module):
     self._dense = {k: v for k, v in kw.items() if k not in distkeys and k != 'equiv'}
     self._dist = {k: v for k, v in kw.items() if k in distkeys and k != 'equiv'}
 
-  def __call__(self, inputs):
-    feat = self._inputs(inputs)
+  def __call__(self, inputs, invariant=False):
+    if invariant:
+      feat = inputs
+    else:
+      feat = self._inputs(inputs)
     if self._symlog_inputs:
       feat = jaxutils.symlog(feat)
     x = jaxutils.cast_to_compute(feat)
@@ -959,11 +962,34 @@ class MLP(nj.Module):
     return self.get(f'dist_{name}', Dist, shape, **self._dist)(x)
 
 
+class InvMLP(MLP):
+
+  def __init__(
+      self, shape, layers, units, deter, stoch, grp, inputs=['tensor'], dims=None,
+      symlog_inputs=False, **kw):
+
+      super().__init__(shape=shape, layers=layers, units=units, 
+                       inputs=inputs, dims=dims, 
+                       symlog_inputs=symlog_inputs, **kw)
+    
+      r2_act = grp.grp_act
+      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.group_pooling = pooling_module(self.feat_type_in, name='group_pooling')      
+
+  def __call__(self, inputs):
+    feat = self._inputs(inputs)
+    x = feat.reshape([-1, feat.shape[-1]])    
+    x = x[:, :, jnp.newaxis, jnp.newaxis]
+    assert len(x.shape)==4
+    x = nn.GeometricTensor(x, self.feat_type_in)
+    x = self.group_pooling(x).tensor.mean(-1).mean(-1)
+    return super().__call__(x.reshape(feat.shape[:-1] + (x.shape[-1],)), invariant=True)
+
 class EquivMLP(MLP):
 
   def __init__(
-      self, shape, layers, units, deter, stoch, key, grp, inputs=['tensor'], dims=None,
-      symlog_inputs=False, invariant=True, cup_catch=False, **kw):
+      self, shape, layers, units, deter, stoch, key, grp, inputs=['tensor'], 
+      dims=None, symlog_inputs=False, cup_catch=False, **kw):
 
       super().__init__(shape=shape, layers=layers, units=units, 
                        inputs=inputs, dims=dims, 
@@ -972,7 +998,7 @@ class EquivMLP(MLP):
       r2_act = grp.grp_act
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
-      keys = jax.random.split(key, 7)
+      keys = jax.random.split(key, 3)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[0], name='s1conv')
@@ -980,33 +1006,29 @@ class EquivMLP(MLP):
                             out_type=self.feat_type_hidden, 
                             kernel_size=1, key=keys[1], name='s2conv')
       self.group_pooling = pooling_module(self.feat_type_hidden, name='group_pooling')        
-      if invariant:
-        self._field_out_type = None
-        self._init_equiv_actor = None
-      else:
-        assert isinstance(shape, tuple)
-        gspace = grp.grp_act
-        if gspace.fibergroup.name == "C2":
-          if cup_catch:
-            self._field_out_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
-          else:
-            self._field_out_type = nn.FieldType(
-                  gspace, shape[0] * [gspace.regular_repr],
-              )
-        elif gspace.fibergroup.name == "D2":
-          # Reacher
-          self._field_out_type = nn.FieldType(
-                gspace,
-                shape[0]
-                * [gspace.quotient_repr((None, gspace.rotations_order))],
-            )
+      
+      assert isinstance(shape, tuple)
+      gspace = grp.grp_act
+      if gspace.fibergroup.name == "C2":
+        if cup_catch:
+          self._field_out_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
         else:
-          raise NotImplementedError("only implemented for groups C2,D2")        
-        self._field_std_type = nn.FieldType(gspace,  shape[0]*[r2_act.trivial_repr])
-        self._init_equiv_actor = nn.R2Conv(in_type=self.feat_type_hidden,
-                                    out_type=self._field_out_type,
-                                    kernel_size=1, key=keys[5])
-      self.invariant = invariant
+          self._field_out_type = nn.FieldType(
+                gspace, shape[0] * [gspace.regular_repr],
+            )
+      elif gspace.fibergroup.name == "D2":
+        # Reacher
+        self._field_out_type = nn.FieldType(
+              gspace,
+              shape[0]
+              * [gspace.quotient_repr((None, gspace.rotations_order))],
+          )
+      else:
+        raise NotImplementedError("only implemented for groups C2,D2")        
+      self._field_std_type = nn.FieldType(gspace,  shape[0]*[r2_act.trivial_repr])
+      self._init_equiv_actor = nn.R2Conv(in_type=self.feat_type_hidden,
+                                  out_type=self._field_out_type,
+                                  kernel_size=1, key=keys[2])
       self.equiv_relu = nn.ReLU(self.feat_type_hidden)
       self._cup_catch = cup_catch
 
@@ -1024,10 +1046,7 @@ class EquivMLP(MLP):
     x = self.equiv_relu(x)
     x = self.escnn2(x)
     x = self.equiv_relu(x)
-    if self.invariant:
-      x = self.group_pooling(x).tensor.mean(-1).mean(-1)
-    else:
-      x = x.tensor.mean(-1).mean(-1)
+    x = x.tensor.mean(-1).mean(-1)
     
     x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
     if self._shape is None:

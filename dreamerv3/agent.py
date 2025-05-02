@@ -199,17 +199,15 @@ class WorldModel(nj.Module):
                                         stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
                                         **config.decoder, grp=grp, name='dec')
     if config.reward_head['equiv']:
-      self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
+      self.heads['reward'] = nets.InvMLP((), deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-                                     key=reward_key,
                                      **config.reward_head, grp=grp, name='rew')
     else:
       self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
 
     if config.cont_head['equiv']:
-      self.heads['cont'] = nets.EquivMLP((), deter=config.rssm['deter'], 
+      self.heads['cont'] = nets.InvMLP((), deter=config.rssm['deter'], 
                                       stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-                                      key=cont_key,
                                       **config.cont_head, grp=grp, name='cont')
     else:
       self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
@@ -435,20 +433,18 @@ class ImagActorCritic(nj.Module):
 
 class VFunction(nj.Module):
 
-  def __init__(self, rewfn, config, grp, key):
+  def __init__(self, rewfn, config, grp):
     self.rewfn = rewfn
     self.config = config
-    net_key, slow_key = jax.random.split(key)
     if config.rssm.equiv:
-      self.net = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-                                     key=net_key,
-                                     **self.config.critic, grp=grp, name='net')
-      # TODO: need to start with the same weights ?
-      self.slow = nets.EquivMLP((), deter=config.rssm['deter'], 
-                                     stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
-                                     key=slow_key,
-                                     **self.config.critic, grp=grp, name='slow')
+      self.net = nets.InvMLP((), deter=config.rssm['deter'], 
+                            stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                            **self.config.critic, grp=grp, 
+                            dims='deter', name='net')
+      self.slow = nets.InvMLP((), deter=config.rssm['deter'], 
+                            stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                            **self.config.critic, grp=grp, 
+                            dims='deter', name='slow')
     else:
       self.net = nets.MLP((), name='net', dims='deter', **self.config.critic)
       self.slow = nets.MLP((), name='slow', dims='deter', **self.config.critic)
