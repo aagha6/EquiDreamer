@@ -60,7 +60,7 @@ class RSSM(nj.Module):
     if self._classes:
       self._field_type_stoch  = nn.FieldType(gspace, stoch * self._classes * [gspace.regular_repr])
     else:
-      self._field_type_stoch  = nn.FieldType(gspace, stoch * 2 * [gspace.regular_repr])
+      self._field_type_stoch  = nn.FieldType(gspace, stoch * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
                                          deter * [gspace.regular_repr])
     self._field_type_embed  = nn.FieldType(gspace,
@@ -121,15 +121,12 @@ class RSSM(nj.Module):
     self.init_stoch_mean = nn.R2Conv(in_type=self._field_type_embed,
                                     out_type=self._field_type_stoch,
                                     kernel_size=1, key=stoch_mean_key)
+    self._embed_group_pooling = pooling_module(self._field_type_embed, name='embed_group_pooling')
     gru_kw = {"in_type":self._field_type_gru_in,
               "out_type":self._field_type_gru_out, 
               "kernel_size":1, 'stride':1, 
               'key':gru_key}    
     self.init_gru_cell = nn.R2Conv(**gru_kw)
-    breaks = list(jnp.arange(0.0, deter * 3, deter))[1:]
-    self._gru_breaks = jax.tree.map(lambda x: int(x.item()), breaks)
-    breaks = list(jnp.arange(0.0, stoch * 2, stoch))[1:]
-    self._stoch_breaks = jax.tree.map(lambda x: int(x.item()), breaks)
 
   def initial(self, bs):
     if self._classes:
@@ -360,15 +357,16 @@ class RSSM(nj.Module):
       return stats
     else:
       if self._equiv:
-        x = self.get(f'{name}', 
+        mean = self.get(f'{name}', 
                       EquivGRUCell, 
                       **{"net":self.init_stoch_mean, 
                         'in_type':self._field_type_embed,
                         'out_type':self._field_type_stoch,
-                        'act':'none'})(x)
-        mean, std = x.split(list(self._stoch_breaks))
-        mean = mean.tensor.mean(-1).mean(-1)
-        std = std.tensor.mean(-1).mean(-1)
+                        'act':'none'})(x).tensor.mean(-1).mean(-1)
+        x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed)
+        x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
+        std = self.get('stoch_std', Linear, self._stoch // self._grp.scaler)(x)
+        std = jnp.repeat(std, 2, -1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
