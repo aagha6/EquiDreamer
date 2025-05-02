@@ -767,7 +767,7 @@ class EquivImageDecoder(nj.Module):
     self.feat_type_in = nn.FieldType(r2_act, (deter//grp.scaler + stoch//grp.scaler) * [r2_act.regular_repr])
     self.feat_type_linear  = nn.FieldType(r2_act,  depth * minres * minres * [r2_act.regular_repr])
     #TODO: clean this up
-    depth = depth * minres * minres
+    depth = depth * minres * minres // grp.scaler
     self.feat_type_hidden1  = nn.FieldType(r2_act,  depth * [r2_act.trivial_repr])
     depth = depth // 2
     self.feat_type_hidden2  = nn.FieldType(r2_act,  depth * [r2_act.regular_repr])
