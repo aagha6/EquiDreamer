@@ -312,11 +312,8 @@ class RSSM(nj.Module):
                       'in_type':self._field_type_gru_in,
                       'out_type':self._field_type_gru_out,
                       'norm':self._kw['norm'],
-                      'act':'none'})(x)
-    reset, cand, update = gru_out.split(list(self._gru_breaks))
-    reset = reset.tensor.mean(-1).mean(-1)
-    cand = cand.tensor.mean(-1).mean(-1)
-    update = update.tensor.mean(-1).mean(-1)
+                      'act':'none'})(x).tensor.mean(-1).mean(-1)
+    reset, cand, update = jnp.split(gru_out, 3, -1)
     reset = jax.nn.sigmoid(reset)
     cand = jnp.tanh(reset * cand)
     update = jax.nn.sigmoid(update - 1)
