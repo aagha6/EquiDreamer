@@ -53,23 +53,20 @@ class RSSM(nj.Module):
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
-    stoch = self._stoch
-    deter = self._deter
-    classes = self._classes
-    units = self._kw['units']
+    units = self._kw['units'] // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
-      self._field_type_stoch  = nn.FieldType(gspace, self._stoch * classes * [gspace.regular_repr])
+      self._field_type_stoch  = nn.FieldType(gspace, self._stoch * self._classes * [gspace.regular_repr])
     else:
-      self._field_type_stoch  = nn.FieldType(gspace, stoch * [gspace.regular_repr])
+      self._field_type_stoch  = nn.FieldType(gspace, self._stoch * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
-                                         deter * [gspace.regular_repr])
+                                         self._deter * [gspace.regular_repr])
     self._field_type_embed  = nn.FieldType(gspace,
                                                units * [gspace.regular_repr])
     self._field_type_gru_in  = nn.FieldType(gspace, 
-                                            (deter + units) * [gspace.regular_repr])
+                                            (self._deter + units) * [gspace.regular_repr])
     self._field_type_gru_out  = nn.FieldType(gspace, 
-                                            3 * deter * [gspace.regular_repr])
+                                            3 * self._deter * [gspace.regular_repr])
     self.sign_mat = None
     if gspace.fibergroup.name == "C2":
         if self._cup_catch:
@@ -91,20 +88,20 @@ class RSSM(nj.Module):
         raise NotImplementedError("only implemented for groups C2,D2")
     if self._classes:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (self._stoch * classes) *\
+                                              (self._stoch * self._classes) *\
                                               [gspace.regular_repr]) + act_type
     else:
       self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch) * [gspace.regular_repr]) + act_type
+                                              (self._stoch) * [gspace.regular_repr]) + act_type
                                             
     self._field_type_inf_in  = nn.FieldType(gspace, 
-                                            (deter + self.embed_size) * [gspace.regular_repr])
+                                            (self._deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
     if self._num_prototypes:
       if self._classes:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch * classes + deter) * [gspace.regular_repr])
+        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch * self._classes + self._deter) * [gspace.regular_repr])
       else:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (stoch + deter) * [gspace.regular_repr])
+        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch + self._deter) * [gspace.regular_repr])
       self._field_type_proto  = nn.FieldType(gspace, self._proto * [gspace.regular_repr])
       self.init_feat_proj = nn.R2Conv(in_type=self._field_type_feat_proj,
                                     out_type=self._field_type_proto,
