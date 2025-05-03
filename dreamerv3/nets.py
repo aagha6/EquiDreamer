@@ -53,9 +53,9 @@ class RSSM(nj.Module):
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
-    stoch = self._stoch // self._grp.scaler
-    deter = self._deter // self._grp.scaler
-    units = self._kw['units'] // self._grp.scaler
+    stoch = self._stoch
+    deter = self._deter
+    units = self._kw['units']
     gspace = self._grp.grp_act
     if self._classes:
       self._field_type_stoch  = nn.FieldType(gspace, stoch * self._classes * [gspace.regular_repr])
@@ -137,10 +137,10 @@ class RSSM(nj.Module):
       if self._equiv:
         #TODO:extend to other types of equivariance
         state = dict(
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32),
-          deter=jnp.zeros([bs, self._deter], f32))
+          mean=jnp.zeros([bs, self._stoch * self._grp.scaler], f32),
+          std=jnp.ones([bs, self._stoch * self._grp.scaler], f32),
+          stoch=jnp.zeros([bs, self._stoch * self._grp.scaler], f32),
+          deter=jnp.zeros([bs, self._deter * self._grp.scaler], f32))
       else:
         state = dict(
           mean=jnp.zeros([bs, self._stoch], f32),
@@ -341,7 +341,7 @@ class RSSM(nj.Module):
         logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
         logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
         logit = jnp.concatenate(logits_list, 1)
-        logit = jnp.split(logit, self._stoch // self._grp.scaler, 1)
+        logit = jnp.split(logit, self._stoch, 1)
         logit = jax.vmap(jnp.transpose, (0, None))(jax.vmap(jnp.stack)(logit), [0,2,1])
         logit = logit.reshape(x.shape[:-1] + (self._stoch, self._classes))
       else:
@@ -364,7 +364,7 @@ class RSSM(nj.Module):
                         'act':'none'})(x).tensor.mean(-1).mean(-1)
         x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed)
         x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
-        std = self.get('stoch_std', Linear, self._stoch // self._grp.scaler)(x)
+        std = self.get('stoch_std', Linear, self._stoch)(x)
         std = jnp.repeat(std, 2, -1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
@@ -973,7 +973,7 @@ class InvMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.group_pooling = pooling_module(self.feat_type_in, name='group_pooling')      
 
   def __call__(self, inputs):
@@ -996,7 +996,7 @@ class EquivMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 3)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
