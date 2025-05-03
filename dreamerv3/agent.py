@@ -35,7 +35,7 @@ class Agent(nj.Module):
     grp = None
     cup_catch = False
     if config.rssm.equiv:
-        assert config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_reacher_easy', 'dmc_cup_catch', 'dmc_pendulum_swingup'], 'Only DMC Cartpole Swingup task supports equivariance'
+        assert config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_reacher_easy', 'dmc_reacher_hard', 'dmc_cup_catch', 'dmc_pendulum_swingup'], 'Only DMC Cartpole Swingup task supports equivariance'
         if config.task in ['dmc_cartpole_swingup', 'dmc_acrobot_swingup', 'dmc_cup_catch', 'dmc_pendulum_swingup']:
           grp = jaxutils.GroupHelper(gspace=gspaces.flip2dOnR2)
           if config.task == 'dmc_cup_catch':
