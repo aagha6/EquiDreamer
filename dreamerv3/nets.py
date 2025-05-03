@@ -54,19 +54,20 @@ class RSSM(nj.Module):
 
   def init_equiv_nets(self, key):    
     units = self._kw['units'] // self._grp.scaler
+    deter = self._deter // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
       self._field_type_stoch  = nn.FieldType(gspace, self._stoch * self._classes * [gspace.regular_repr])
     else:
       self._field_type_stoch  = nn.FieldType(gspace, self._stoch * [gspace.regular_repr])
     self._field_type_deter  = nn.FieldType(gspace,
-                                         self._deter * [gspace.regular_repr])
+                                         deter * [gspace.regular_repr])
     self._field_type_embed  = nn.FieldType(gspace,
                                                units * [gspace.regular_repr])
     self._field_type_gru_in  = nn.FieldType(gspace, 
-                                            (self._deter + units) * [gspace.regular_repr])
+                                            (deter + units) * [gspace.regular_repr])
     self._field_type_gru_out  = nn.FieldType(gspace, 
-                                            3 * self._deter * [gspace.regular_repr])
+                                            3 * deter * [gspace.regular_repr])
     self.sign_mat = None
     if gspace.fibergroup.name == "C2":
         if self._cup_catch:
@@ -95,13 +96,13 @@ class RSSM(nj.Module):
                                               (self._stoch) * [gspace.regular_repr]) + act_type
                                             
     self._field_type_inf_in  = nn.FieldType(gspace, 
-                                            (self._deter + self.embed_size) * [gspace.regular_repr])
+                                            (deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
     if self._num_prototypes:
       if self._classes:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch * self._classes + self._deter) * [gspace.regular_repr])
+        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch * self._classes + deter) * [gspace.regular_repr])
       else:
-        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch + self._deter) * [gspace.regular_repr])
+        self._field_type_feat_proj  = nn.FieldType(gspace, (self._stoch + deter) * [gspace.regular_repr])
       self._field_type_proto  = nn.FieldType(gspace, self._proto * [gspace.regular_repr])
       self.init_feat_proj = nn.R2Conv(in_type=self._field_type_feat_proj,
                                     out_type=self._field_type_proto,
@@ -128,13 +129,11 @@ class RSSM(nj.Module):
   def initial(self, bs):
     if self._equiv:
         stoch = self._stoch * self._grp.scaler
-        deter = self._deter * self._grp.scaler
     else:
         stoch = self._stoch
-        deter = self._deter
     if self._classes:
       state = dict(
-          deter=jnp.zeros([bs, deter], f32),
+          deter=jnp.zeros([bs, self._deter], f32),
           logit=jnp.zeros([bs, stoch, self._classes], f32),
           stoch=jnp.zeros([bs, stoch, self._classes], f32))
     else:
@@ -142,7 +141,7 @@ class RSSM(nj.Module):
         mean=jnp.zeros([bs, stoch], f32),
         std=jnp.ones([bs, stoch], f32),
         stoch=jnp.zeros([bs, stoch], f32), 
-        deter=jnp.zeros([bs, deter], f32))
+        deter=jnp.zeros([bs, self._deter], f32))
     if self._initial == 'zeros':
       return cast(state)
     elif self._initial == 'learned':
@@ -964,7 +963,7 @@ class InvMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch) * [r2_act.regular_repr])
       self.group_pooling = pooling_module(self.feat_type_in, name='group_pooling')      
 
   def __call__(self, inputs):
@@ -986,7 +985,7 @@ class EquivMLP(MLP):
                        inputs=inputs, dims=dims, 
                        symlog_inputs=symlog_inputs, **kw)
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 3)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
