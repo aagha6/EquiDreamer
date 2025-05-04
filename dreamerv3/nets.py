@@ -355,7 +355,7 @@ class RSSM(nj.Module):
         x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed)
         x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
         std = self.get('stoch_std', Linear, self._stoch)(x)
-        std = jnp.repeat(std, 2, -1)
+        std = jnp.repeat(std, self._grp.scaler, -1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
