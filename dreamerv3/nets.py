@@ -436,23 +436,18 @@ class RSSM(nj.Module):
       return swav_loss, temp_loss, norm_loss
 
   def proto_loss(self, post, obs_proj, ema_proj):
+    if self._equiv:
+      proto = self._proto * self._grp.scaler
+    else:
+      proto = self._proto
     prototypes = self.get('prototypes', 
-                          Initializer('unit_normal'), (self._num_prototypes, self._proto))
+                          Initializer('unit_normal'), (self._num_prototypes, proto))
     prototypes = jaxutils.l2_normalize(prototypes, axis=-1)
     prototypes = self.put('prototypes', prototypes)
     
     B, T = obs_proj.shape[:2]
-    if self._equiv:
-      obs_proj = jnp.reshape(obs_proj, [B*T, -1])
-      obs_proj = obs_proj.reshape([obs_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
-    else:
-      obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
-
-    if self._equiv:
-      ema_proj = jnp.reshape(ema_proj, [B*T, -1])
-      ema_proj = ema_proj.reshape([ema_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
-    else:
-      ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
+    obs_proj = jnp.reshape(obs_proj, [B*T, -1])    
+    ema_proj = jnp.reshape(ema_proj, [B*T, -1])
 
     feat = self._inputs(post)
     if self._equiv:
@@ -467,19 +462,8 @@ class RSSM(nj.Module):
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
 
-    if self._equiv:
-      feat_proj = jnp.reshape(feat_proj, [B*T, -1])
-      feat_proj = feat_proj.reshape([feat_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
-    else:
-      feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
-    
-    if self._equiv:
-      swav_loss, temp_loss, norm_loss = jax.vmap(self.get_prob_and_target, 
-                                                [None,1,1,1,None,None])(
-                                                prototypes, obs_proj, 
-                                                ema_proj, feat_proj, B, T)
-    else:
-      swav_loss, temp_loss, norm_loss = self.get_prob_and_target(
+    feat_proj = jnp.reshape(feat_proj, [B*T, -1])
+    swav_loss, temp_loss, norm_loss = self.get_prob_and_target(
                                         prototypes, obs_proj, ema_proj, 
                                         feat_proj, B, T)
 
