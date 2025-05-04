@@ -686,6 +686,7 @@ class EquivImageEncoder(nj.Module):
 
   def __init__(self, depth, grp, key, **kw):
     gspace = grp.grp_act
+    depth = depth // grp.scaler
     self.feat_type_in  = nn.FieldType(gspace,  3*[gspace.trivial_repr])
     self.feat_type_out1  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
