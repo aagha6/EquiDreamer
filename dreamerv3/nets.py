@@ -444,19 +444,13 @@ class RSSM(nj.Module):
     B, T = obs_proj.shape[:2]
     if self._equiv:
       obs_proj = jnp.reshape(obs_proj, [B*T, -1])
-      obs_proj = nn.GeometricTensor(obs_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      obs_proj_list = obs_proj.split(list(range(len(obs_proj.type)))[1:])
-      obs_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), obs_proj_list)
-      obs_proj = jnp.concatenate(obs_proj_list,-1)
+      obs_proj = obs_proj.reshape([obs_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
 
     if self._equiv:
       ema_proj = jnp.reshape(ema_proj, [B*T, -1])
-      ema_proj = nn.GeometricTensor(ema_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      ema_proj_list = ema_proj.split(list(range(len(ema_proj.type)))[1:])
-      ema_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), ema_proj_list)
-      ema_proj = jnp.concatenate(ema_proj_list,-1)
+      ema_proj = ema_proj.reshape([ema_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
 
@@ -469,17 +463,13 @@ class RSSM(nj.Module):
                   'out_type':self._field_type_proto,
                   'norm':'none',
                   'act':'none'})(feat.reshape([-1] + list(feat.shape[2:])))
-      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      feat_proj = feat_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
+      feat_proj = feat_proj.reshape(post['deter'].shape[:2] + (-1,))
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
 
     if self._equiv:
       feat_proj = jnp.reshape(feat_proj, [B*T, -1])
-      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      feat_proj_list = feat_proj.split(list(range(len(feat_proj.type)))[1:])
-      feat_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), feat_proj_list)
-      feat_proj = jnp.concatenate(feat_proj_list,-1)      
+      feat_proj = feat_proj.reshape([feat_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
     
