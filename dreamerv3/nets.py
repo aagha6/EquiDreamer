@@ -937,8 +937,11 @@ class MLP(nj.Module):
     self._dense = {k: v for k, v in kw.items() if k not in distkeys and k != 'equiv'}
     self._dist = {k: v for k, v in kw.items() if k in distkeys and k != 'equiv'}
 
-  def __call__(self, inputs):
-    feat = self._inputs(inputs)
+  def __call__(self, inputs, invariant=False):
+    if invariant:
+      feat = inputs
+    else:
+      feat = self._inputs(inputs)
     if self._symlog_inputs:
       feat = jaxutils.symlog(feat)
     x = jaxutils.cast_to_compute(feat)
@@ -959,6 +962,29 @@ class MLP(nj.Module):
     return self.get(f'dist_{name}', Dist, shape, **self._dist)(x)
 
 
+class InvMLP(MLP):
+
+  def __init__(
+      self, shape, layers, units, deter, stoch, grp, inputs=['tensor'], dims=None,
+      symlog_inputs=False, **kw):
+
+      super().__init__(shape=shape, layers=layers, units=units, 
+                       inputs=inputs, dims=dims, 
+                       symlog_inputs=symlog_inputs, **kw)
+    
+      r2_act = grp.grp_act
+      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.group_pooling = pooling_module(self.feat_type_in, name='group_pooling')      
+
+  def __call__(self, inputs):
+    feat = self._inputs(inputs)
+    x = feat.reshape([-1, feat.shape[-1]])    
+    x = x[:, :, jnp.newaxis, jnp.newaxis]
+    assert len(x.shape)==4
+    x = nn.GeometricTensor(x, self.feat_type_in)
+    x = self.group_pooling(x).tensor.mean(-1).mean(-1)
+    return super().__call__(x.reshape(feat.shape[:-1] + (x.shape[-1],)), invariant=True)
+  
 class EquivMLP(MLP):
 
   def __init__(
