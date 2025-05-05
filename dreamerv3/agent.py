@@ -199,15 +199,17 @@ class WorldModel(nj.Module):
                                         stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
                                         **config.decoder, grp=grp, name='dec')
     if config.reward_head['equiv']:
-      self.heads['reward'] = nets.InvMLP((), deter=config.rssm['deter'], 
+      self.heads['reward'] = nets.EquivMLP((), deter=config.rssm['deter'], 
                                      stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                     key=reward_key,
                                      **config.reward_head, grp=grp, name='rew')
     else:
       self.heads['reward'] = nets.MLP((), **config.reward_head, name='rew')
 
     if config.cont_head['equiv']:
-      self.heads['cont'] = nets.InvMLP((), deter=config.rssm['deter'], 
+      self.heads['cont'] = nets.EquivMLP((), deter=config.rssm['deter'], 
                                       stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
+                                      key=cont_key,
                                       **config.cont_head, grp=grp, name='cont')
     else:
       self.heads['cont'] = nets.MLP((), **config.cont_head, name='cont')
