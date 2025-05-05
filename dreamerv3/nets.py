@@ -969,6 +969,7 @@ class EquivMLP(MLP):
                        inputs=inputs, dims=dims, 
                        symlog_inputs=symlog_inputs, **kw)
     
+      units = units // grp.scaler
       r2_act = grp.grp_act
       self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
