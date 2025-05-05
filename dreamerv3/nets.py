@@ -53,8 +53,8 @@ class RSSM(nj.Module):
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
-    stoch = self._stoch // self._grp.scaler
-    deter = self._deter // self._grp.scaler
+    stoch = self._stoch
+    deter = self._deter
     units = self._kw['units'] // self._grp.scaler
     gspace = self._grp.grp_act
     if self._classes:
@@ -128,25 +128,23 @@ class RSSM(nj.Module):
     self.init_gru_cell = nn.R2Conv(**gru_kw)
 
   def initial(self, bs):
+    if self._equiv:
+      stoch = self._stoch * self._grp.scaler
+      deter = self._deter * self._grp.scaler
+    else:
+      stoch = self._stoch
+      deter = self._deter
     if self._classes:
       state = dict(
           deter=jnp.zeros([bs, self._deter], f32),
-          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
+          logit=jnp.zeros([bs, stoch, self._classes], f32),
+          stoch=jnp.zeros([bs, stoch, self._classes], f32))
     else:
-      if self._equiv:
-        #TODO:extend to other types of equivariance
-        state = dict(
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32),
-          deter=jnp.zeros([bs, self._deter], f32))
-      else:
-        state = dict(
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32), 
-          deter=jnp.zeros([bs, self._deter], f32))
+      state = dict(
+        mean=jnp.zeros([bs, stoch], f32),
+        std=jnp.ones([bs, stoch], f32),
+        stoch=jnp.zeros([bs, stoch], f32), 
+        deter=jnp.zeros([bs, deter], f32))
     if self._initial == 'zeros':
       return cast(state)
     elif self._initial == 'learned':
@@ -364,8 +362,8 @@ class RSSM(nj.Module):
                         'act':'none'})(x).tensor.mean(-1).mean(-1)
         x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed)
         x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
-        std = self.get('stoch_std', Linear, self._stoch // self._grp.scaler)(x)
-        std = jnp.repeat(std, 2, -1)
+        std = self.get('stoch_std', Linear, self._stoch)(x)
+        std = jnp.repeat(std, self._grp.scaler, -1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
@@ -973,7 +971,7 @@ class InvMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.group_pooling = pooling_module(self.feat_type_in, name='group_pooling')      
 
   def __call__(self, inputs):
@@ -996,7 +994,7 @@ class EquivMLP(MLP):
                        symlog_inputs=symlog_inputs, **kw)
     
       r2_act = grp.grp_act
-      self.feat_type_in = nn.FieldType(r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr])
+      self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
       keys = jax.random.split(key, 7)
       self.escnn1 = econv_module(in_type=self.feat_type_in, 
