@@ -689,9 +689,9 @@ class EquivImageEncoder(nj.Module):
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 6
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
+    self.feat_type_linear  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
-    keys = jax.random.split(key, 6)
+    keys = jax.random.split(key, 7)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out1, 
                           kernel_size=3 ,stride=1,
@@ -719,6 +719,11 @@ class EquivImageEncoder(nj.Module):
                           kernel_size=3 ,stride=1,
                           key=keys[4], name='s5conv')
     self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
+    self.linear = econv_module(in_type=self.feat_type_out5, 
+                          out_type=self.feat_type_linear,
+                          kernel_size=1 ,stride=1,
+                          key=keys[5], name='linear')
+    self.equiv_relu_linear = nn.ReLU(self.feat_type_linear)
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
@@ -735,8 +740,9 @@ class EquivImageEncoder(nj.Module):
     x = self.equiv_relu4(x)
     x = self.escnn5(x)
     x = self.equiv_relu5(x)
-    x = x.tensor
-    x = x.reshape((x.shape[0], -1))
+    x = self.linear(x)
+    x = self.equiv_relu_linear(x)
+    x = x.tensor.reshape((x.shape[0], -1))
     return x
   
 class EquivImageDecoder(nj.Module):
