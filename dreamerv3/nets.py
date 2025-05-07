@@ -185,7 +185,7 @@ class RSSM(nj.Module):
     else:
       mean = state['mean'].astype(f32)
       std = state['std'].astype(f32)
-      return jaxutils.EquivMultivariateNormalDiag(loc=mean, scale_diag=std, scaler=self._grp.scaler)
+      return jaxutils.EquivMultivariateNormalDiag(mean, std)
 
   def obs_step(self, prev_state, prev_action, embed, is_first):
     is_first = cast(is_first)
@@ -212,7 +212,7 @@ class RSSM(nj.Module):
       x = self.get('obs_out', Linear, **self._kw)(x)    
     stats = self._stats('obs_stats', x)
     dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng())
+    stoch = dist.sample(seed=nj.rng(), scaler=self._grp.scaler)
     post = {'stoch': stoch, 'deter': prior['deter'], **stats}
     return cast(post), cast(prior)
 
@@ -262,7 +262,7 @@ class RSSM(nj.Module):
       x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng())
+    stoch = dist.sample(seed=nj.rng(), scaler=self._grp.scaler)
     prior = {'stoch': stoch, 'deter': deter, **stats}
     return cast(prior)
 
