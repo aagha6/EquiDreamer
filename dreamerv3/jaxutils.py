@@ -542,3 +542,40 @@ def l2_normalize(vectors, axis=-1, epsilon=1e-9):
         epsilon: Small value to avoid division by zero."""
     norms = jnp.linalg.norm(vectors, axis=axis, ord=2, keepdims=True)
     return vectors / jnp.maximum(norms, epsilon)
+
+
+class EquivMultivariateNormalDiag(tfd.MultivariateNormalDiag):
+    def __init__(self, loc, scale_diag, scaler):
+        """
+        Wrapper for tfd.MultivariateNormalDiag that ensures fiber dimensions are sampled the same.
+
+        Args:
+            loc: Mean of the distribution.
+            scale_diag: Standard deviation of the distribution.
+        """
+        shape = loc.shape[:-1] + (loc.shape[-1] // scaler,)
+        self.base_dist = tfd.MultivariateNormalDiag(loc=jnp.zeros(shape), scale_diag=jnp.ones(shape))
+        self.scaler = scaler
+        super().__init__(loc=loc, scale_diag=scale_diag)
+
+    def sample(self, seed, sample_shape=()):
+        """
+        Samples from the distribution, ensuring each pair of consecutive elements
+        are the same.
+
+        Args:
+            seed: PRNG key for sampling.
+            sample_shape: Shape of the samples to generate.
+
+        Returns:
+            A sample with the specified shape, where each pair of consecutive elements
+            are the same.
+        """
+        # Sample from the base distribution
+        raw_sample = self.base_dist.sample(seed=seed, sample_shape=sample_shape)
+        reshaped_sample = jnp.repeat(raw_sample, self.scaler, axis=-1)
+
+        samples = self.loc + reshaped_sample * self.scale.diag
+
+        # Flatten back to the original shape
+        return samples
