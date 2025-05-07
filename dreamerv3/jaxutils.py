@@ -551,7 +551,7 @@ class EquivMultivariateNormalDiag(tfd.MultivariateNormalDiag):
         rnd = jax.random.normal(seed, shape=self.loc.shape[:-1] + (self.loc.shape[-1] // scaler,))
         reshaped_sample = jnp.repeat(rnd, scaler, axis=-1)
 
-        samples = self.loc + reshaped_sample * self.scale.diag
+        samples = self.loc + reshaped_sample * self._scale_diag
 
         # Flatten back to the original shape
         return samples
