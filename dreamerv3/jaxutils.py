@@ -542,16 +542,3 @@ def l2_normalize(vectors, axis=-1, epsilon=1e-9):
         epsilon: Small value to avoid division by zero."""
     norms = jnp.linalg.norm(vectors, axis=axis, ord=2, keepdims=True)
     return vectors / jnp.maximum(norms, epsilon)
-
-
-class EquivMultivariateNormalDiag(tfd.MultivariateNormalDiag):
-    def sample(self, seed, scaler=None):
-        assert scaler is not None
-        # Sample from the base distribution
-        rnd = jax.random.normal(seed, shape=self.loc.shape[:-1] + (self.loc.shape[-1] // scaler,))
-        reshaped_sample = jnp.repeat(rnd, scaler, axis=-1)
-
-        samples = self.loc + reshaped_sample * self._scale_diag
-
-        # Flatten back to the original shape
-        return samples

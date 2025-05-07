@@ -185,7 +185,7 @@ class RSSM(nj.Module):
     else:
       mean = state['mean'].astype(f32)
       std = state['std'].astype(f32)
-      return jaxutils.EquivMultivariateNormalDiag(mean, std)
+      return tfd.MultivariateNormalDiag(mean, std)
 
   def obs_step(self, prev_state, prev_action, embed, is_first):
     is_first = cast(is_first)
@@ -211,8 +211,16 @@ class RSSM(nj.Module):
     else:
       x = self.get('obs_out', Linear, **self._kw)(x)    
     stats = self._stats('obs_stats', x)
-    dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng(), scaler=self._grp.scaler)
+    if self._equiv:
+      mean = stats['mean'].astype(f32)
+      std = stats['std'].astype(f32)
+      rnd = jax.random.normal(nj.rng(), shape=mean.shape[:-1] + 
+                              (mean.shape[-1] // self._grp.scaler,))
+      reshaped_sample = jnp.repeat(rnd, self._grp.scaler, axis=-1)
+      stoch = mean + reshaped_sample * std
+    else:
+      dist = self.get_dist(stats)          
+      stoch = dist.sample(seed=nj.rng())
     post = {'stoch': stoch, 'deter': prior['deter'], **stats}
     return cast(post), cast(prior)
 
@@ -261,8 +269,16 @@ class RSSM(nj.Module):
     else:
       x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
-    dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng(), scaler=self._grp.scaler)
+    if self._equiv:
+      mean = stats['mean'].astype(f32)
+      std = stats['std'].astype(f32)
+      rnd = jax.random.normal(nj.rng(), shape=mean.shape[:-1] + 
+                              (mean.shape[-1] // self._grp.scaler,))
+      reshaped_sample = jnp.repeat(rnd, self._grp.scaler, axis=-1)
+      stoch = mean + reshaped_sample * std
+    else:
+      dist = self.get_dist(stats)          
+      stoch = dist.sample(seed=nj.rng())
     prior = {'stoch': stoch, 'deter': deter, **stats}
     return cast(prior)
 
