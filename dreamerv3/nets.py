@@ -211,8 +211,6 @@ class RSSM(nj.Module):
     stats = self._stats('obs_stats', x)
     dist = self.get_dist(stats)
     stoch = dist.sample(seed=nj.rng())
-    if self._equiv and self._classes:
-        stoch = stoch.transpose([0,2,1])
     post = {'stoch': stoch, 'deter': prior['deter'], **stats}
     return cast(post), cast(prior)
 
@@ -263,8 +261,6 @@ class RSSM(nj.Module):
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
     stoch = dist.sample(seed=nj.rng())
-    if self._equiv and self._classes:
-        stoch = stoch.transpose([0,2,1])
     prior = {'stoch': stoch, 'deter': deter, **stats}
     return cast(prior)
 
@@ -335,13 +331,8 @@ class RSSM(nj.Module):
                         'out_type':self._field_type_stoch,
                         'norm':'none',
                         'act': 'none'})(x)
-        flat_logits = nn.GeometricTensor(flat_logits[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch)
-        logits_list = flat_logits.split(list(range(len(flat_logits.type)))[1:])
-        logits_list = jax.tree.map(lambda t: t.tensor.reshape((x.shape[0], 1, t.shape[1])), logits_list)
-        logit = jnp.concatenate(logits_list, 1)
-        logit = jnp.split(logit, self._stoch // self._grp.scaler, 1)
-        logit = jax.vmap(jnp.transpose, (0, None))(jax.vmap(jnp.stack)(logit), [0,2,1])
-        logit = logit.reshape(x.shape[:-1] + (self._stoch, self._classes))
+        logit = jnp.stack(jnp.split(flat_logits, self._stoch , -1), 1)
+        logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
         logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
@@ -442,19 +433,13 @@ class RSSM(nj.Module):
     B, T = obs_proj.shape[:2]
     if self._equiv:
       obs_proj = jnp.reshape(obs_proj, [B*T, -1])
-      obs_proj = nn.GeometricTensor(obs_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      obs_proj_list = obs_proj.split(list(range(len(obs_proj.type)))[1:])
-      obs_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), obs_proj_list)
-      obs_proj = jnp.concatenate(obs_proj_list,-1)
+      obs_proj = obs_proj.reshape([obs_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
 
     if self._equiv:
       ema_proj = jnp.reshape(ema_proj, [B*T, -1])
-      ema_proj = nn.GeometricTensor(ema_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      ema_proj_list = ema_proj.split(list(range(len(ema_proj.type)))[1:])
-      ema_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), ema_proj_list)
-      ema_proj = jnp.concatenate(ema_proj_list,-1)
+      ema_proj = ema_proj.reshape([ema_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
 
@@ -467,17 +452,13 @@ class RSSM(nj.Module):
                   'out_type':self._field_type_proto,
                   'norm':'none',
                   'act':'none'})(feat.reshape([-1] + list(feat.shape[2:])))
-      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      feat_proj = feat_proj.tensor.mean(-1).mean(-1).reshape(post['deter'].shape[:2] + (-1,))
+      feat_proj = feat_proj.reshape(post['deter'].shape[:2] + (-1,))
     else:
       feat_proj = self.get('feat_proj', Linear, **{'units': self._proto})(feat)
 
     if self._equiv:
       feat_proj = jnp.reshape(feat_proj, [B*T, -1])
-      feat_proj = nn.GeometricTensor(feat_proj[: , :, jnp.newaxis, jnp.newaxis], self._field_type_proto)
-      feat_proj_list = feat_proj.split(list(range(len(feat_proj.type)))[1:])
-      feat_proj_list = jax.tree_util.tree_map(lambda x: x.tensor.mean(-1), feat_proj_list)
-      feat_proj = jnp.concatenate(feat_proj_list,-1)      
+      feat_proj = feat_proj.reshape([feat_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
     else:
       feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
     
@@ -694,6 +675,7 @@ class EquivImageEncoder(nj.Module):
 
   def __init__(self, depth, grp, key, **kw):
     gspace = grp.grp_act
+    depth = depth // grp.scaler
     self.feat_type_in  = nn.FieldType(gspace,  3*[gspace.trivial_repr])
     self.feat_type_out1  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 2
@@ -705,16 +687,14 @@ class EquivImageEncoder(nj.Module):
     depth *= 2
     self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
     depth *= 6
-    self.feat_type_out5  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
+    self.feat_type_linear  = nn.FieldType(gspace,  depth*[gspace.regular_repr])
 
-    keys = jax.random.split(key, 6)
+    keys = jax.random.split(key, 7)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out1, 
-                          kernel_size=3 ,stride=1,
+                          kernel_size=4 ,stride=2,
                           key=keys[0], name='s1conv')
     self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
-    self.s1pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out1,
-                        kernel_size=2, stride=2)
     self.escnn2 = econv_module(in_type=self.feat_type_out1,
                           out_type=self.feat_type_out2,
                           kernel_size=3 ,stride=2,
@@ -735,6 +715,11 @@ class EquivImageEncoder(nj.Module):
                           kernel_size=3 ,stride=1,
                           key=keys[4], name='s5conv')
     self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
+    self.linear = econv_module(in_type=self.feat_type_out5, 
+                          out_type=self.feat_type_linear,
+                          kernel_size=1 ,stride=1,
+                          key=keys[5], name='linear')
+    self.equiv_relu_linear = nn.ReLU(self.feat_type_linear)
 
   def __call__(self, x):
     x = jaxutils.cast_to_compute(x) - 0.5
@@ -742,7 +727,6 @@ class EquivImageEncoder(nj.Module):
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
     x = self.equiv_relu1(x)
-    x = self.s1pool(x)
     x = self.escnn2(x)
     x = self.equiv_relu2(x)
     x = self.escnn3(x)
@@ -751,8 +735,9 @@ class EquivImageEncoder(nj.Module):
     x = self.equiv_relu4(x)
     x = self.escnn5(x)
     x = self.equiv_relu5(x)
-    x = x.tensor
-    x = x.reshape((x.shape[0], -1))
+    x = self.linear(x)
+    x = self.equiv_relu_linear(x)
+    x = x.tensor.reshape((x.shape[0], -1))
     return x
   
 class EquivImageDecoder(nj.Module):
@@ -992,7 +977,6 @@ class EquivMLP(MLP):
       super().__init__(shape=shape, layers=layers, units=units, 
                        inputs=inputs, dims=dims, 
                        symlog_inputs=symlog_inputs, **kw)
-    
       r2_act = grp.grp_act
       self.feat_type_in = nn.FieldType(r2_act, (deter + stoch) * [r2_act.regular_repr])
       self.feat_type_hidden  = nn.FieldType(r2_act,  units*[r2_act.regular_repr])
