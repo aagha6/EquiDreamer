@@ -222,7 +222,11 @@ class RSSM(nj.Module):
       prev_action *= sg(self._action_clip / jnp.maximum(
           self._action_clip, jnp.abs(prev_action)))
     if self._classes:
-      shape = prev_stoch.shape[:-2] + (self._stoch * self._factor * self._classes,)
+      if self._equiv:
+        n_stoch = self._stoch * self._factor
+      else:
+        n_stoch = self._stoch
+      shape = prev_stoch.shape[:-2] + (n_stoch * self._classes,)
       prev_stoch = prev_stoch.reshape(shape)
     if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
