@@ -694,11 +694,9 @@ class EquivImageEncoder(nj.Module):
     keys = jax.random.split(key, 7)
     self.escnn1 = econv_module(in_type=self.feat_type_in, 
                           out_type=self.feat_type_out1, 
-                          kernel_size=3 ,stride=1,
+                          kernel_size=4 ,stride=2,
                           key=keys[0], name='s1conv')
     self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
-    self.s1pool = nn.PointwiseAvgPool2D(in_type=self.feat_type_out1,
-                        kernel_size=2, stride=2)
     self.escnn2 = econv_module(in_type=self.feat_type_out1,
                           out_type=self.feat_type_out2,
                           kernel_size=3 ,stride=2,
@@ -731,7 +729,6 @@ class EquivImageEncoder(nj.Module):
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
     x = self.equiv_relu1(x)
-    x = self.s1pool(x)
     x = self.escnn2(x)
     x = self.equiv_relu2(x)
     x = self.escnn3(x)
