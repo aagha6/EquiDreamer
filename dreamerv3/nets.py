@@ -138,8 +138,8 @@ class RSSM(nj.Module):
     if self._classes:
       state = dict(
           deter=jnp.zeros([bs, deter], f32),
-          logit=jnp.zeros([bs, stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, stoch, self._classes], f32))
+          logit=jnp.zeros([bs, stoch * self._classes // self._grp.grp_act.regular_repr.size , self._grp.grp_act.regular_repr.size], f32),
+          stoch=jnp.zeros([bs, stoch * self._classes // self._grp.grp_act.regular_repr.size , self._grp.grp_act.regular_repr.size], f32))
     else:
       state = dict(
         mean=jnp.zeros([bs, stoch], f32),
@@ -336,7 +336,8 @@ class RSSM(nj.Module):
                         'out_type':self._field_type_stoch,
                         'norm':'none',
                         'act': 'none'})(x)
-        logit = jnp.stack(jnp.split(flat_logits, self._stoch * self._factor , -1), 1)
+        #logit = jnp.stack(jnp.split(flat_logits, self._stoch * self._factor , -1), 1)
+        logit = jnp.stack(jnp.split(flat_logits,flat_logits.shape[-1] / self._grp.grp_act.regular_repr.size,-1), 1)
         logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
