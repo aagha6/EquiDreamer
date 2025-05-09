@@ -50,6 +50,7 @@ class RSSM(nj.Module):
       assert embed_size is not None
       self.embed_size = embed_size
       self._grp = grp
+      self._factor = self._grp.grp_act.regular_repr.size // self._grp.scaler
       self.init_equiv_nets(key)
 
   def init_equiv_nets(self, key):    
@@ -128,25 +129,23 @@ class RSSM(nj.Module):
     self.init_gru_cell = nn.R2Conv(**gru_kw)
 
   def initial(self, bs):
+    if self._equiv:
+      stoch = self._stoch * self._factor
+      deter = self._deter * self._factor
+    else:
+      stoch = self._stoch
+      deter = self._deter
     if self._classes:
       state = dict(
-          deter=jnp.zeros([bs, self._deter], f32),
-          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
+          deter=jnp.zeros([bs, deter], f32),
+          logit=jnp.zeros([bs, stoch, self._classes], f32),
+          stoch=jnp.zeros([bs, stoch, self._classes], f32))
     else:
-      if self._equiv:
-        #TODO:extend to other types of equivariance
-        state = dict(
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32),
-          deter=jnp.zeros([bs, self._deter], f32))
-      else:
-        state = dict(
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32), 
-          deter=jnp.zeros([bs, self._deter], f32))
+      state = dict(
+        mean=jnp.zeros([bs, stoch], f32),
+        std=jnp.ones([bs, stoch], f32),
+        stoch=jnp.zeros([bs, stoch], f32), 
+        deter=jnp.zeros([bs, deter], f32))
     if self._initial == 'zeros':
       return cast(state)
     elif self._initial == 'learned':
@@ -223,7 +222,11 @@ class RSSM(nj.Module):
       prev_action *= sg(self._action_clip / jnp.maximum(
           self._action_clip, jnp.abs(prev_action)))
     if self._classes:
-      shape = prev_stoch.shape[:-2] + (self._stoch * self._classes,)
+      if self._equiv:
+        n_stoch = self._stoch * self._factor
+      else:
+        n_stoch = self._stoch
+      shape = prev_stoch.shape[:-2] + (n_stoch * self._classes,)
       prev_stoch = prev_stoch.reshape(shape)
     if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
@@ -333,7 +336,7 @@ class RSSM(nj.Module):
                         'out_type':self._field_type_stoch,
                         'norm':'none',
                         'act': 'none'})(x)
-        logit = jnp.stack(jnp.split(flat_logits, self._stoch , -1), 1)
+        logit = jnp.stack(jnp.split(flat_logits, self._stoch * self._factor , -1), 1)
         logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
@@ -355,8 +358,8 @@ class RSSM(nj.Module):
                         'act':'none'})(x).tensor.mean(-1).mean(-1)
         x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed)
         x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
-        std = self.get('stoch_std', Linear, self._stoch // self._grp.scaler)(x)
-        std = jnp.repeat(std, self._grp.scaler, -1)
+        std = self.get('stoch_std', Linear, self._stoch * self._factor // self._grp.grp_act.regular_repr.size)(x)
+        std = jnp.repeat(std, self._grp.grp_act.regular_repr.size, -1)
       else:
         x = self.get(name, Linear, 2 * self._stoch)(x)
         mean, std = jnp.split(x, 2, -1)
@@ -435,13 +438,13 @@ class RSSM(nj.Module):
     B, T = obs_proj.shape[:2]
     if self._equiv:
       obs_proj = jnp.reshape(obs_proj, [B*T, -1])
-      obs_proj = obs_proj.reshape([obs_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
+      obs_proj = obs_proj.reshape([obs_proj.shape[0], self._proto, self._grp.grp_act.regular_repr.size]).transpose(0,2,1)
     else:
       obs_proj = jnp.reshape(obs_proj, [B*T, self._proto])
 
     if self._equiv:
       ema_proj = jnp.reshape(ema_proj, [B*T, -1])
-      ema_proj = ema_proj.reshape([ema_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
+      ema_proj = ema_proj.reshape([ema_proj.shape[0], self._proto, self._grp.grp_act.regular_repr.size]).transpose(0,2,1)
     else:
       ema_proj = jnp.reshape(ema_proj, [B*T, self._proto])
 
@@ -460,7 +463,7 @@ class RSSM(nj.Module):
 
     if self._equiv:
       feat_proj = jnp.reshape(feat_proj, [B*T, -1])
-      feat_proj = feat_proj.reshape([feat_proj.shape[0], self._proto, self._grp.scaler]).transpose(0,2,1)
+      feat_proj = feat_proj.reshape([feat_proj.shape[0], self._proto, self._grp.grp_act.regular_repr.size]).transpose(0,2,1)
     else:
       feat_proj = jnp.reshape(feat_proj, [B*T, self._proto])
     
