@@ -73,30 +73,23 @@ class RSSM(nj.Module):
     self.sign_mat = None
     if gspace.fibergroup.name == "C2":
         if self._cup_catch:
-          act_type = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
+          self._field_type_act = nn.FieldType(gspace, [gspace.regular_repr] + [gspace.trivial_repr])
         else:
-          act_type = nn.FieldType(
+          self._field_type_act = nn.FieldType(
               gspace,
               self._act_dim * [gspace.regular_repr],
           )
 
     elif gspace.fibergroup.name == "D2":
         # Reacher
-        act_type = nn.FieldType(
+        self._field_type_act = nn.FieldType(
             gspace,
             self._act_dim
             * [gspace.quotient_repr((None, gspace.rotations_order))],
         )
     else:
         raise NotImplementedError("only implemented for groups C2,D2")
-    if self._classes:
-      self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch * self._classes) *\
-                                              [gspace.regular_repr]) + act_type
-    else:
-      self._field_type_img_in  = nn.FieldType(gspace, 
-                                              (stoch) * [gspace.regular_repr]) + act_type
-                                            
+    self._field_type_img_in  = self._field_type_stoch + self._field_type_act                                            
     self._field_type_inf_in  = nn.FieldType(gspace, 
                                             (deter + self.embed_size) * [gspace.regular_repr])
     img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = jax.random.split(key, 6)
@@ -236,7 +229,10 @@ class RSSM(nj.Module):
         act = prev_action @ jnp.array([[1, -1, 0], [0, 0, 1]], dtype=jnp.float32)
       else:
         act = jnp.concatenate([prev_action, -prev_action], -1)
-      x = jnp.concatenate([prev_stoch, act], -1)
+
+      prev_stoch = nn.GeometricTensor(prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch) 
+      act = nn.GeometricTensor(act[:, :, jnp.newaxis, jnp.newaxis], self._field_type_act)
+      x = nn.tensor_directsum([prev_stoch, act]).tensor.mean(-1).mean(-1)
       x = self.get('img_in', 
                     EquivLinear, 
                     **{"net":self.init_img_in, 
