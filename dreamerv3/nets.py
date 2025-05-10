@@ -117,8 +117,8 @@ class RSSM(nj.Module):
     self._embed_group_pooling = pooling_module(self._field_type_embed, name='embed_group_pooling')
     gru_kw = {"in_type":self._field_type_gru_in,
               "out_type":self._field_type_gru_out, 
-              "kernel_size":1, 'stride':1, 
-              'key':gru_key}    
+              "kernel_size":1, 'stride':1,
+              'use_bias':False, 'key':gru_key}    
     self.init_gru_cell = nn.R2Conv(**gru_kw)
 
   def initial(self, bs):
