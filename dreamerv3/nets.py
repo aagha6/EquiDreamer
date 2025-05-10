@@ -129,18 +129,27 @@ class RSSM(nj.Module):
     self.init_gru_cell = nn.R2Conv(**gru_kw)
 
   def initial(self, bs):
-    if self._equiv:
-      stoch = self._stoch * self._factor
-      deter = self._deter * self._factor
-    else:
-      stoch = self._stoch
-      deter = self._deter
     if self._classes:
-      state = dict(
-          deter=jnp.zeros([bs, deter], f32),
-          logit=jnp.zeros([bs, stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, stoch, self._classes], f32))
+      if self._equiv:
+        n_stoch = self._stoch // self._grp.scaler
+        n_reg = self._grp.grp_act.regular_repr.size
+        deter = self._deter * self._factor
+        state = dict(
+            deter=jnp.zeros([bs, deter], f32),
+            logit=jnp.zeros([bs, n_reg, n_stoch, self._classes], f32),
+            stoch=jnp.zeros([bs, n_stoch, self._classes, n_reg], f32))
+      else:
+        state = dict(
+            deter=jnp.zeros([bs, self._deter], f32),
+            logit=jnp.zeros([bs, self._stoch, self._classes], f32),
+            stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
     else:
+      if self._equiv:
+        stoch = self._stoch * self._factor
+        deter = self._deter * self._factor
+      else:
+        stoch = self._stoch
+        deter = self._deter
       state = dict(
         mean=jnp.zeros([bs, stoch], f32),
         std=jnp.ones([bs, stoch], f32),
@@ -211,7 +220,10 @@ class RSSM(nj.Module):
       x = self.get('obs_out', Linear, **self._kw)(x)    
     stats = self._stats('obs_stats', x)
     dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng())
+    if self._equiv and self._classes:
+      stoch = jnp.moveaxis(dist.sample(seed=nj.rng()),-3,-1)
+    else:
+      stoch = dist.sample(seed=nj.rng())
     post = {'stoch': stoch, 'deter': prior['deter'], **stats}
     return cast(post), cast(prior)
 
@@ -223,10 +235,13 @@ class RSSM(nj.Module):
           self._action_clip, jnp.abs(prev_action)))
     if self._classes:
       if self._equiv:
-        n_stoch = self._stoch * self._factor
+        n_stoch = self._stoch // self._grp.scaler
       else:
         n_stoch = self._stoch
-      shape = prev_stoch.shape[:-2] + (n_stoch * self._classes,)
+      if self._equiv:
+        shape = prev_stoch.shape[:-3] + (n_stoch * self._classes * self._grp.grp_act.regular_repr.size,)
+      else:
+        shape = prev_stoch.shape[:-2] + (n_stoch * self._classes,)
       prev_stoch = prev_stoch.reshape(shape)
     if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
       shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
@@ -265,7 +280,10 @@ class RSSM(nj.Module):
       x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
-    stoch = dist.sample(seed=nj.rng())
+    if self._equiv and self._classes:
+      stoch = jnp.moveaxis(dist.sample(seed=nj.rng()),-3,-1)
+    else:
+      stoch = dist.sample(seed=nj.rng())
     prior = {'stoch': stoch, 'deter': deter, **stats}
     return cast(prior)
 
@@ -282,7 +300,10 @@ class RSSM(nj.Module):
       x = self.get('img_out', Linear, **self._kw)(deter)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
-    return cast(dist.mode())
+    if self._equiv and self._classes:
+      return jnp.moveaxis(cast(dist.mode()),-3,-1)
+    else: 
+      return cast(dist.mode())
 
   def _conv_gru(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
@@ -329,6 +350,7 @@ class RSSM(nj.Module):
   def _stats(self, name, x):
     if self._classes:
       if self._equiv:
+        n_stoch = self._stoch // self._grp.scaler
         flat_logits = self.get(f'{name}', 
                       EquivLinear, 
                       **{"net":self.init_stoch_mean, 
@@ -336,8 +358,9 @@ class RSSM(nj.Module):
                         'out_type':self._field_type_stoch,
                         'norm':'none',
                         'act': 'none'})(x)
-        logit = jnp.stack(jnp.split(flat_logits, self._stoch * self._factor , -1), 1)
-        logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
+        logit = jnp.stack(jnp.split(flat_logits, n_stoch * self._classes, -1),1)
+        logit = logit.reshape(flat_logits.shape[:-1] + (n_stoch, self._classes, -1))
+        logit = jnp.moveaxis(logit, -1, 1)
       else:
         x = self.get(name, Linear, self._stoch * self._classes)(x)
         logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))

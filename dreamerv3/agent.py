@@ -277,6 +277,7 @@ class WorldModel(nj.Module):
       assert loss.shape == embed.shape[:2], (key, loss.shape)
       losses[key] = loss
     scaled = {k: v * self.scales[k] for k, v in losses.items()}
+    scaled = {k: v.mean(-1) if len(v.shape)==3 else v for k, v in losses.items()}
     model_loss = sum(scaled.values())
     out = {'embed':  embed, 'post': post, 'prior': prior}
     out.update({f'{k}_loss': v for k, v in losses.items()})
