@@ -228,7 +228,7 @@ class RSSM(nj.Module):
       if self._cup_catch:
         act = prev_action @ jnp.array([[1, -1, 0], [0, 0, 1]], dtype=jnp.float32)
       else:
-        act = jnp.concatenate([prev_action, -prev_action], -1)
+        act = jnp.stack([prev_action, -prev_action], -1).reshape(prev_action.shape[:-1]+(-1,))
 
       prev_stoch = nn.GeometricTensor(prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch) 
       act = nn.GeometricTensor(act[:, :, jnp.newaxis, jnp.newaxis], self._field_type_act)
