@@ -234,9 +234,9 @@ class WorldModel(nj.Module):
     mets, (state, outs, metrics) = self.opt(
         modules, self.loss, data, state, has_aux=True)
     metrics.update(mets)
-    if self.config.aug.swav:
-      self._encoder_updater()
-      self._proj_updater()
+    #if self.config.aug.swav:
+    #  self._encoder_updater()
+    #  self._proj_updater()
     return state, outs, metrics
 
   def ema_proj(self, data):
