@@ -269,7 +269,7 @@ class WorldModel(nj.Module):
       else:
         obs_proj = self._obs_proj(embed)
       ema_proj = self.ema_proj(data)
-      losses = self.rssm.proto_loss(post=post, obs_proj=obs_proj, ema_proj=ema_proj)
+      #losses = self.rssm.proto_loss(post=post, obs_proj=obs_proj, ema_proj=ema_proj)
     losses['dyn'] = self.rssm.dyn_loss(post, prior, **self.config.dyn_loss)
     losses['rep'] = self.rssm.rep_loss(post, prior, **self.config.rep_loss)
     for key, dist in dists.items():
