@@ -364,10 +364,12 @@ class ImagActorCritic(nj.Module):
         stoch=config.rssm['stoch'] * config.rssm['classes'] if config.rssm['classes'] else config.rssm['stoch'], 
         shape=act_space.shape, **config.actor, cup_catch=self.cup_catch,
         dist=config.actor_dist_disc if disc else config.actor_dist_cont)  
+      self._equiv = True
     else:
       self.actor = nets.MLP(
         name='actor', dims='deter', shape=act_space.shape, **config.actor,
         dist=config.actor_dist_disc if disc else config.actor_dist_cont)
+      self._equiv = False
     self.retnorms = {
         k: jaxutils.Moments(**config.retnorm, name=f'retnorm_{k}')
         for k in critics}
@@ -381,7 +383,10 @@ class ImagActorCritic(nj.Module):
 
   def train(self, imagine, start, context):
     def loss(start):
-      policy = lambda s: self.actor(sg(s)).sample(seed=nj.rng())
+      if self._equiv:
+        policy = lambda s: self.actor(sg(s)).mode()
+      else: 
+        policy = lambda s: self.actor(sg(s)).sample(seed=nj.rng())
       traj = imagine(policy, start, self.config.imag_horizon)
       loss, metrics = self.loss(traj)
       return loss, (traj, metrics)
