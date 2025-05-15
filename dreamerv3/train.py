@@ -1,3 +1,4 @@
+import subprocess
 import importlib
 import pathlib
 import sys
@@ -19,6 +20,15 @@ __package__ = directory.name
 import embodied
 from embodied import wrappers
 
+def get_git_commit_hash():
+    try:
+        # Run the Git command to get the commit hash
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'], stderr=subprocess.STDOUT)
+        # Decode the output from bytes to string and strip any extra whitespace
+        return commit_hash.decode('utf-8').strip()
+    except subprocess.CalledProcessError as e:
+        print("Error while getting commit hash:", e.output.decode('utf-8'))
+        return None
 
 def main(argv=None):
   from . import agent as agt
@@ -31,6 +41,8 @@ def main(argv=None):
   args = embodied.Config(
       **config.run, logdir=config.logdir,
       batch_steps=config.batch_size * config.batch_length)
+
+  print("Current Git Commit Hash:", get_git_commit_hash())
   print(config)
 
   logdir = embodied.Path(args.logdir)
