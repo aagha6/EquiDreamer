@@ -1018,7 +1018,7 @@ class EquivMLP(MLP):
                                     out_type=self._field_out_type,
                                     kernel_size=1, key=keys[5])
       self.invariant = invariant
-      self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+      self.equiv_silu = nn.SiLU(self.feat_type_hidden)
       self._cup_catch = cup_catch
 
   def __call__(self, inputs):
@@ -1032,9 +1032,13 @@ class EquivMLP(MLP):
     assert len(x.shape)==4
     x = nn.GeometricTensor(x, self.feat_type_in)
     x = self.escnn1(x)
-    x = self.equiv_relu(x)
+    x = self.get('norm1', Norm, 'layer')(x.tensor.mean(-1).mean(-1))
+    x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self.feat_type_hidden)
+    x = self.equiv_silu(x)
     x = self.escnn2(x)
-    x = self.equiv_relu(x)
+    x = self.get('norm2', Norm, 'layer')(x.tensor.mean(-1).mean(-1))
+    x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self.feat_type_hidden)
+    x = self.equiv_silu(x)
     if self.invariant:
       x = self.group_pooling(x).tensor.mean(-1).mean(-1)
     else:
