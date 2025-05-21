@@ -14,8 +14,13 @@ class Greedy(nj.Module):
 
     def __init__(self, wm, act_space, config, key, grp, cup_catch):
         rewfn = lambda s: wm.heads["reward"](s).mean()[1:]
+        actor_key, critic_key = random.split(key)
         if config.critic_type == "vfunction":
-            critics = {"extr": agent.VFunction(rewfn, config, grp, name="critic")}
+            critics = {
+                "extr": agent.VFunction(
+                    rewfn, config, grp, key=critic_key, name="critic"
+                )
+            }
         else:
             raise NotImplementedError(config.critic_type)
         self.ac = agent.ImagActorCritic(
@@ -25,7 +30,7 @@ class Greedy(nj.Module):
             config,
             grp=grp,
             cup_catch=cup_catch,
-            actor_key=key,
+            actor_key=actor_key,
             name="ac",
         )
 

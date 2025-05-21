@@ -1240,6 +1240,84 @@ class InvMLP(MLP):
         )
 
 
+class EquivCritic(MLP):
+
+    def __init__(
+        self,
+        shape,
+        layers,
+        units,
+        deter,
+        stoch,
+        key,
+        grp,
+        inputs=["tensor"],
+        dims=None,
+        symlog_inputs=False,
+        **kw,
+    ):
+
+        super().__init__(
+            shape=shape,
+            layers=layers,
+            units=units,
+            inputs=inputs,
+            dims=dims,
+            symlog_inputs=symlog_inputs,
+            **kw,
+        )
+        r2_act = grp.grp_act
+        factor = r2_act.regular_repr.size // grp.scaler
+        units = units // factor
+        self.feat_type_in = nn.FieldType(
+            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+        )
+        self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
+        keys = jax.random.split(key, 2)
+        self.escnn1 = econv_module(
+            in_type=self.feat_type_in,
+            out_type=self.feat_type_hidden,
+            kernel_size=1,
+            key=keys[0],
+            name="s1conv",
+        )
+        self.escnn2 = econv_module(
+            in_type=self.feat_type_hidden,
+            out_type=self.feat_type_hidden,
+            kernel_size=1,
+            key=keys[1],
+            name="s2conv",
+        )
+        self.equiv_silu = nn.SiLU(self.feat_type_hidden)
+        self.group_pooling = pooling_module(self.feat_type_hidden, name="group_pooling")
+
+    def __call__(self, inputs):
+        feat = self._inputs(inputs)
+        if self._symlog_inputs:
+            feat = jaxutils.symlog(feat)
+        x = jaxutils.cast_to_compute(feat)
+        x = x.reshape([-1, x.shape[-1]])
+
+        x = x[:, :, jnp.newaxis, jnp.newaxis]
+        assert len(x.shape) == 4
+        x = nn.GeometricTensor(x, self.feat_type_in)
+
+        x = self.escnn1(x)
+        x = self.get("norm1", Norm, "layer")(x.tensor.mean(-1).mean(-1))
+        x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self.feat_type_hidden)
+        x = self.equiv_silu(x)
+
+        x = self.escnn2(x)
+        x = self.get("norm2", Norm, "layer")(x.tensor.mean(-1).mean(-1))
+        x = nn.GeometricTensor(x[:, :, jnp.newaxis, jnp.newaxis], self.feat_type_hidden)
+        x = self.equiv_silu(x)
+
+        x = self.group_pooling(x).tensor.mean(-1).mean(-1)
+
+        x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
+        return self._out("out", self._shape, x)
+
+
 class EquivMLP(MLP):
 
     def __init__(

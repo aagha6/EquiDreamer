@@ -573,11 +573,12 @@ class ImagActorCritic(nj.Module):
 
 class VFunction(nj.Module):
 
-    def __init__(self, rewfn, config, grp):
+    def __init__(self, rewfn, config, grp, key):
         self.rewfn = rewfn
         self.config = config
         if config.rssm.equiv:
-            self.net = nets.InvMLP(
+            net_key, slow_key = jax.random.split(key, 2)
+            self.net = nets.EquivCritic(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
@@ -585,12 +586,12 @@ class VFunction(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
+                key=net_key,
                 **self.config.critic,
                 grp=grp,
-                dims="deter",
                 name="net",
             )
-            self.slow = nets.InvMLP(
+            self.slow = nets.EquivCritic(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
@@ -598,9 +599,9 @@ class VFunction(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
+                key=slow_key,
                 **self.config.critic,
                 grp=grp,
-                dims="deter",
                 name="slow",
             )
         else:
