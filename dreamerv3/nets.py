@@ -1749,6 +1749,9 @@ def get_act(name, in_type=None):
     elif name == "equiv_relu":
         assert in_type is not None
         return lambda x: nn.ReLU(in_type=in_type)(x)
+    elif name == "equiv_silu":
+        assert in_type is not None
+        return lambda x: nn.SiLU(in_type=in_type)(x)
     elif name == "mish":
         return lambda x: x * jnp.tanh(jax.nn.softplus(x))
     elif hasattr(jax.nn, name):
