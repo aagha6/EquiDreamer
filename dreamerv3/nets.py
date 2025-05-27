@@ -1275,7 +1275,7 @@ class EquivMLP(MLP):
             r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
-        keys = jax.random.split(key, 7)
+        keys = jax.random.split(key, 3)
         self.escnn1 = econv_module(
             in_type=self.feat_type_in,
             out_type=self.feat_type_hidden,
@@ -1322,7 +1322,7 @@ class EquivMLP(MLP):
                 in_type=self.feat_type_hidden,
                 out_type=self._field_out_type,
                 kernel_size=1,
-                key=keys[5],
+                key=keys[2],
             )
         self.invariant = invariant
         self.equiv_relu = nn.ReLU(self.feat_type_hidden)
