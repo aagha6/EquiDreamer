@@ -437,7 +437,7 @@ class RSSM(nj.Module):
                     f"{name}",
                     EquivLinear,
                     **{
-                        "net": self.init_stoch_mean,
+                        "net": self.init_stoch_mean[name],
                         "in_type": self._field_type_embed,
                         "out_type": self._field_type_stoch,
                         "norm": "none",
