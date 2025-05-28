@@ -74,10 +74,10 @@ class RSSM(nj.Module):
             self.init_equiv_nets(key)
 
     def init_equiv_nets(self, key):
-        units = self._kw["units"] // self._grp.scaler
-        stoch = self._stoch // self._grp.scaler
-        deter = self._deter // self._grp.scaler
         gspace = self._grp.grp_act
+        units = self._kw["units"] // self._grp.scaler
+        stoch = self._stoch // gspace.regular_repr.size
+        deter = self._deter // gspace.regular_repr.size
         if self._classes:
             self._field_type_stoch = nn.FieldType(
                 gspace, stoch * self._classes * [gspace.regular_repr]
@@ -174,12 +174,8 @@ class RSSM(nj.Module):
         self.init_gru_cell = nn.R2Conv(**gru_kw)
 
     def initial(self, bs):
-        if self._equiv:
-            stoch = self._stoch * self._factor
-            deter = self._deter * self._factor
-        else:
-            stoch = self._stoch
-            deter = self._deter
+        stoch = self._stoch
+        deter = self._deter
         if self._classes:
             state = dict(
                 deter=jnp.zeros([bs, deter], f32),
@@ -467,7 +463,7 @@ class RSSM(nj.Module):
                 std = self.get(
                     "stoch_std",
                     Linear,
-                    self._stoch * self._factor // self._grp.grp_act.regular_repr.size,
+                    self._stoch // self._grp.grp_act.regular_repr.size,
                 )(x)
                 std = jnp.repeat(std, self._grp.grp_act.regular_repr.size, -1)
             else:
@@ -948,7 +944,9 @@ class EquivImageDecoder(nj.Module):
         minres = kw["minres"]
         depth = cnn_depth
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act,
+            (deter // r2_act.regular_repr.size + stoch // r2_act.regular_repr.size)
+            * [r2_act.regular_repr],
         )
         self.feat_type_linear = nn.FieldType(
             r2_act, depth * minres * minres * [r2_act.regular_repr]
@@ -1224,7 +1222,9 @@ class InvMLP(MLP):
 
         r2_act = grp.grp_act
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act,
+            (deter // r2_act.regular_repr.size + stoch // r2_act.regular_repr.size)
+            * [r2_act.regular_repr],
         )
         self.group_pooling = pooling_module(self.feat_type_in, name="group_pooling")
 
@@ -1272,7 +1272,9 @@ class EquivMLP(MLP):
         factor = r2_act.regular_repr.size // grp.scaler
         units = units // factor
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act,
+            (deter // r2_act.regular_repr.size + stoch // r2_act.regular_repr.size)
+            * [r2_act.regular_repr],
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
         keys = jax.random.split(key, 3)
