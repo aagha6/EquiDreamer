@@ -296,11 +296,8 @@ class WorldModel(nj.Module):
             self.heads["reward"] = nets.EquivMLP(
                 (),
                 deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
+                stoch=config.rssm["stoch"],
+                classes=config.rssm["classes"],
                 key=reward_key,
                 **config.reward_head,
                 grp=grp,
@@ -313,11 +310,8 @@ class WorldModel(nj.Module):
             self.heads["cont"] = nets.EquivMLP(
                 (),
                 deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
+                stoch=config.rssm["stoch"],
+                classes=config.rssm["classes"],
                 key=cont_key,
                 **config.cont_head,
                 grp=grp,
@@ -487,11 +481,8 @@ class ImagActorCritic(nj.Module):
                 deter=config.rssm["deter"],
                 grp=grp,
                 key=actor_key,
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
+                stoch=config.rssm["stoch"],
+                classes=config.rssm["classes"],
                 shape=act_space.shape,
                 **config.actor,
                 cup_catch=self.cup_catch,
@@ -580,11 +571,8 @@ class VFunction(nj.Module):
             self.net = nets.InvMLP(
                 (),
                 deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
+                stoch=config.rssm["stoch"],
+                classes=config.rssm["classes"],
                 **self.config.critic,
                 grp=grp,
                 dims="deter",
@@ -593,11 +581,8 @@ class VFunction(nj.Module):
             self.slow = nets.InvMLP(
                 (),
                 deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
+                stoch=config.rssm["stoch"],
+                classes=config.rssm["classes"],
                 **self.config.critic,
                 grp=grp,
                 dims="deter",
