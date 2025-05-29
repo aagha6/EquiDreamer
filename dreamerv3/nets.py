@@ -875,7 +875,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_out1,
             kernel_size=4,
             stride=2,
-            use_bias=False,
             key=keys[0],
             name="s1conv",
         )
@@ -885,7 +884,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_out2,
             kernel_size=3,
             stride=2,
-            use_bias=False,
             key=keys[1],
             name="s2conv",
         )
@@ -895,7 +893,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_out3,
             kernel_size=3,
             stride=2,
-            use_bias=False,
             key=keys[2],
             name="s3conv",
         )
@@ -905,7 +902,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_out4,
             kernel_size=3,
             stride=2,
-            use_bias=False,
             key=keys[3],
             name="s4conv",
         )
@@ -915,7 +911,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_out5,
             kernel_size=3,
             stride=1,
-            use_bias=False,
             key=keys[4],
             name="s5conv",
         )
@@ -925,7 +920,6 @@ class EquivImageEncoder(nj.Module):
             out_type=self.feat_type_linear,
             kernel_size=1,
             stride=1,
-            use_bias=False,
             key=keys[5],
             name="linear",
         )
@@ -936,28 +930,16 @@ class EquivImageEncoder(nj.Module):
         x = jnp.moveaxis(x, -1, 1)
         x = nn.GeometricTensor(x, self.feat_type_in)
         x = self.escnn1(x)
-        x = self.get("norm_1", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_out1)
         x = self.equiv_relu1(x)
         x = self.escnn2(x)
-        x = self.get("norm_2", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_out2)
         x = self.equiv_relu2(x)
         x = self.escnn3(x)
-        x = self.get("norm_3", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_out3)
         x = self.equiv_relu3(x)
         x = self.escnn4(x)
-        x = self.get("norm_4", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_out4)
         x = self.equiv_relu4(x)
         x = self.escnn5(x)
-        x = self.get("norm_5", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_out5)
         x = self.equiv_relu5(x)
         x = self.linear(x)
-        x = self.get("norm_6", Norm, "escnn_layer")(x.tensor)
-        x = nn.GeometricTensor(x, self.feat_type_linear)
         x = self.equiv_relu_linear(x)
         x = x.tensor.reshape((x.shape[0], -1))
         return x
