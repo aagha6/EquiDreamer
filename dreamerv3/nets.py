@@ -141,17 +141,20 @@ class RSSM(nj.Module):
             in_type=self._field_type_img_in,
             out_type=self._field_type_embed,
             kernel_size=1,
+            use_bias=False,
             key=img_in_key,
         )
         self.init_img_out = nn.R2Conv(
             in_type=self._field_type_deter,
             out_type=self._field_type_embed,
             kernel_size=1,
+            use_bias=False,
             key=img_out_key,
         )
         self.init_obs_out = nn.R2Conv(
             in_type=self._field_type_inf_in,
             out_type=self._field_type_embed,
+            use_bias=False,
             kernel_size=1,
             key=obs_out_key,
         )
@@ -170,6 +173,7 @@ class RSSM(nj.Module):
             "kernel_size": 1,
             "stride": 1,
             "key": gru_key,
+            "use_bias": False,
         }
         self.init_gru_cell = nn.R2Conv(**gru_kw)
 
