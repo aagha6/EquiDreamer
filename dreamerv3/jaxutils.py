@@ -416,7 +416,9 @@ class Optimizer(nj.Module):
             count = 0
             for k, v in params.items():
                 if isinstance(v, nn.R2Conv):
-                    count += v.weights.array.size + v.bias.array.size
+                    count += v.weights.array.size
+                    if v.use_bias:
+                        count += v.bias.array.size
                 else:
                     count += sum(x.size for x in jax.tree_leaves(v))
             print(f"Optimizer {self.name} has {count:,} variables.")
@@ -502,9 +504,10 @@ def polyak_averaging(src, dst, mix):
                 dst[k].weights = nn.equinox.ParameterArray(
                     mix * v.weights.array + (1 - mix) * dst[k].weights.array
                 )
-                dst[k].bias = nn.equinox.ParameterArray(
-                    mix * v.bias.array + (1 - mix) * dst[k].bias.array
-                )
+                if v.use_bias:
+                    dst[k].bias = nn.equinox.ParameterArray(
+                        mix * v.bias.array + (1 - mix) * dst[k].bias.array
+                    )
         else:
             dst[k] = tree_map(lambda s, d: mix * s + (1 - mix) * d, v, dst[k])
     return dst
