@@ -577,6 +577,7 @@ class VFunction(nj.Module):
         self.rewfn = rewfn
         self.config = config
         if config.rssm.equiv:
+            net_key, slow_key = jax.random.split(key, 2)
             self.net = nets.EquivCritic(
                 (),
                 deter=config.rssm["deter"],
@@ -585,7 +586,7 @@ class VFunction(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
-                key=key,
+                key=net_key,
                 **self.config.critic,
                 grp=grp,
                 name="net",
@@ -598,7 +599,7 @@ class VFunction(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
-                key=key,
+                key=slow_key,
                 **self.config.critic,
                 grp=grp,
                 name="slow",
