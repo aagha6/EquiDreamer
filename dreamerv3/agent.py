@@ -294,7 +294,7 @@ class WorldModel(nj.Module):
                 name="dec",
             )
         if config.reward_head["equiv"]:
-            self.heads["reward"] = nets.EquivMLP(
+            self.heads["reward"] = nets.InvMLP(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
@@ -302,7 +302,6 @@ class WorldModel(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
-                key=reward_key,
                 **config.reward_head,
                 grp=grp,
                 name="rew",
@@ -311,7 +310,7 @@ class WorldModel(nj.Module):
             self.heads["reward"] = nets.MLP((), **config.reward_head, name="rew")
 
         if config.cont_head["equiv"]:
-            self.heads["cont"] = nets.EquivMLP(
+            self.heads["cont"] = nets.InvMLP(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
@@ -319,7 +318,6 @@ class WorldModel(nj.Module):
                     if config.rssm["classes"]
                     else config.rssm["stoch"]
                 ),
-                key=cont_key,
                 **config.cont_head,
                 grp=grp,
                 name="cont",
