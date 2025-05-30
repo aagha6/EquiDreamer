@@ -411,7 +411,7 @@ class WorldModel(nj.Module):
 
         def step(prev, _):
             prev = prev.copy()
-            state = self.rssm.img_step(prev, prev.pop("action"))
+            state = self.rssm.img_step(prev, prev.pop("action"), mode=True)
             return {**state, "action": policy(state)}
 
         traj = jaxutils.scan(step, jnp.arange(horizon), start, self.config.imag_unroll)
