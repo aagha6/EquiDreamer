@@ -164,6 +164,10 @@ class RSSM(nj.Module):
         self._embed_group_pooling = pooling_module(
             self._field_type_embed, name="embed_group_pooling"
         )
+        if self._classes:
+            self._stoch_group_pooling = pooling_module(
+                self._field_type_stoch, name="stoch_group_pooling"
+            )
         gru_kw = {
             "in_type": self._field_type_gru_in,
             "out_type": self._field_type_gru_out,
@@ -605,7 +609,34 @@ class RSSM(nj.Module):
 
     def dyn_loss(self, post, prior, impl="kl", free=1.0):
         if impl == "kl":
-            loss = self.get_dist(sg(post)).kl_divergence(self.get_dist(prior))
+            if self._equiv and self._classes:
+                pooled_post, pooled_prior = {}, {}
+                B, T = post["logit"].shape[:2]
+                post_logits = post["logit"].reshape(post["logit"].shape[:2] + (-1,))
+                post_logits = nn.GeometricTensor(
+                    post_logits.reshape((B * T, -1))[..., jnp.newaxis, jnp.newaxis],
+                    self._field_type_stoch,
+                )
+                pooled_post["logit"] = (
+                    self._stoch_group_pooling(post_logits)
+                    .tensor.mean(-1)
+                    .mean(-1)
+                    .reshape(B, T, self._stoch, -1)
+                )
+                prior_logits = prior["logit"].reshape(prior["logit"].shape[:2] + (-1,))
+                prior_logits = nn.GeometricTensor(
+                    prior_logits.reshape((B * T, -1))[..., jnp.newaxis, jnp.newaxis],
+                    self._field_type_stoch,
+                )
+                pooled_prior["logit"] = (
+                    self._stoch_group_pooling(prior_logits)
+                    .tensor.mean(-1)
+                    .mean(-1)
+                    .reshape(B, T, self._stoch, -1)
+                )
+            loss = self.get_dist(sg(pooled_post)).kl_divergence(
+                self.get_dist(pooled_prior)
+            )
         elif impl == "logprob":
             loss = -self.get_dist(prior).log_prob(sg(post["stoch"]))
         else:
@@ -616,7 +647,34 @@ class RSSM(nj.Module):
 
     def rep_loss(self, post, prior, impl="kl", free=1.0):
         if impl == "kl":
-            loss = self.get_dist(post).kl_divergence(self.get_dist(sg(prior)))
+            if self._equiv and self._classes:
+                pooled_post, pooled_prior = {}, {}
+                B, T = post["logit"].shape[:2]
+                post_logits = post["logit"].reshape(post["logit"].shape[:2] + (-1,))
+                post_logits = nn.GeometricTensor(
+                    post_logits.reshape((B * T, -1))[..., jnp.newaxis, jnp.newaxis],
+                    self._field_type_stoch,
+                )
+                pooled_post["logit"] = (
+                    self._stoch_group_pooling(post_logits)
+                    .tensor.mean(-1)
+                    .mean(-1)
+                    .reshape(B, T, self._stoch, -1)
+                )
+                prior_logits = prior["logit"].reshape(prior["logit"].shape[:2] + (-1,))
+                prior_logits = nn.GeometricTensor(
+                    prior_logits.reshape((B * T, -1))[..., jnp.newaxis, jnp.newaxis],
+                    self._field_type_stoch,
+                )
+                pooled_prior["logit"] = (
+                    self._stoch_group_pooling(prior_logits)
+                    .tensor.mean(-1)
+                    .mean(-1)
+                    .reshape(B, T, self._stoch, -1)
+                )
+            loss = self.get_dist(pooled_post).kl_divergence(
+                self.get_dist(sg(pooled_prior))
+            )
         elif impl == "uniform":
             uniform = jax.tree_util.tree_map(lambda x: jnp.zeros_like(x), prior)
             loss = self.get_dist(post).kl_divergence(self.get_dist(uniform))
