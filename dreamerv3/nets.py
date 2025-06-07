@@ -227,6 +227,8 @@ class RSSM(nj.Module):
     def get_dist(self, state, argmax=False):
         if self._classes:
             logit = state["logit"].astype(f32)
+            if self._equiv:
+                logit = jnp.moveaxis(logit, -1, -2)
             return tfd.Independent(jaxutils.OneHotDist(logit), 1)
         else:
             mean = state["mean"].astype(f32)
