@@ -3,6 +3,7 @@ import os
 
 import embodied
 import numpy as np
+from transformers import AutoImageProcessor
 
 
 class DMC(embodied.Env):
@@ -44,6 +45,9 @@ class DMC(embodied.Env):
         self._render = render
         self._size = size
         self._camera = camera
+        self._image_processor = AutoImageProcessor.from_pretrained(
+            "facebook/dinov2-base"
+        )
 
     @functools.cached_property
     def obs_space(self):
@@ -63,6 +67,10 @@ class DMC(embodied.Env):
         obs = self._env.step(action)
         if self._render:
             obs["image"] = self.render()
+            img = self._image_processor(images=obs["image"], return_tensors="np")
+            obs["image"] = img["pixel_values"][0].transpose(
+                1, 2, 0
+            )  # Move channel to last dimension.
         return obs
 
     def render(self):

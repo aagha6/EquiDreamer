@@ -7,6 +7,7 @@ import equinox as eqx
 import escnn_jax.nn as nn
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
+from transformers import FlaxDinov2Model
 
 f32 = jnp.float32
 tfd = tfp.distributions
@@ -671,6 +672,8 @@ class MultiEncoder(nj.Module):
         mlp_kw = {**kw, "symlog_inputs": symlog_inputs, "name": "mlp"}
         if cnn == "resnet":
             self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
+        if cnn == "dino":
+            self._cnn = ImageEncoderDINO(name="cnn")
         elif cnn == "equiv":
             self._cnn = EquivImageEncoder(cnn_depth, grp=grp, key=key, **cnn_kw)
         if self.mlp_shapes:
@@ -797,6 +800,17 @@ class MultiDecoder(nj.Module):
         if self._image_dist == "mse":
             return jaxutils.MSEDist(mean, 3, "sum")
         raise NotImplementedError(self._image_dist)
+
+
+class ImageEncoderDINO(nj.Module):
+
+    def __init__(self):
+        self._model = FlaxDinov2Model.from_pretrained("facebook/dinov2-base")
+
+    def __call__(self, x):
+        x = jnp.moveaxis(x, -1, 1)
+        outputs = self._model(x)
+        return outputs.pooler_output
 
 
 class ImageEncoderResnet(nj.Module):

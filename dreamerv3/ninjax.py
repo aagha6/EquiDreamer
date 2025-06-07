@@ -446,7 +446,7 @@ class Module(object, metaclass=ModuleMeta):
         self.putm({self.path + "/" + name: value})
         return value
 
-    def getm(self, pattern=r".*", allow_empty=False):
+    def getm(self, pattern=r".*", allow_empty=True):
         """Read the state entries of this module, optionally filtered by regex."""
         pattern = re.compile(pattern)
         prefix = self.path + "/"

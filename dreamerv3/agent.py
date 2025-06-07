@@ -62,6 +62,8 @@ class Agent(nj.Module):
             elif "reacher" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
         wm_key, beh_key = jax.random.split(key, 2)
+        if self.config.aug.swav and self.config.encoder.cnn == "dino":
+            raise ValueError("swav and dino cannot be used together.")
         self.wm = WorldModel(
             obs_space,
             act_space,
@@ -99,7 +101,7 @@ class Agent(nj.Module):
 
     def policy(self, obs, state, mode="train"):
         self.config.jax.jit and print("Tracing policy function.")
-        obs = self.preprocess(obs, aug=False)
+        obs = self.preprocess(obs, swav=False, dino=self.config.encoder.cnn == "dino")
         (prev_latent, prev_action), task_state, expl_state = state
         embed = self.wm.encoder(obs)
         latent, _ = self.wm.rssm.obs_step(
@@ -126,7 +128,9 @@ class Agent(nj.Module):
     def train(self, data, state):
         self.config.jax.jit and print("Tracing train function.")
         metrics = {}
-        data = self.preprocess(data, aug=self.config.aug.swav)
+        data = self.preprocess(
+            data, swav=self.config.aug.swav, dino=self.config.encoder.cnn == "dino"
+        )
         if self.config.aug.swav:
             prev_latent, prev_action = state
             prev_latent = {
@@ -153,7 +157,7 @@ class Agent(nj.Module):
 
     def report(self, data):
         self.config.jax.jit and print("Tracing report function.")
-        data = self.preprocess(data)
+        data = self.preprocess(data, dino=self.config.encoder.cnn == "dino")
         report = {}
         report.update(self.wm.report(data))
         mets = self.task_behavior.report(data)
@@ -163,19 +167,19 @@ class Agent(nj.Module):
             report.update({f"expl_{k}": v for k, v in mets.items()})
         return report
 
-    def preprocess(self, obs, aug=False):
+    def preprocess(self, obs, swav=False, dino=False):
         obs = obs.copy()
         for key, value in obs.items():
             if key.startswith("log_") or key in ("key",):
                 continue
-            if len(value.shape) > 3 and value.dtype == jnp.uint8:
+            if len(value.shape) > 3 and value.dtype == jnp.uint8 and not dino:
                 value = jaxutils.cast_to_compute(value) / 255.0
             else:
                 value = value.astype(jnp.float32)
             obs[key] = value
         obs["cont"] = 1.0 - obs["is_terminal"].astype(jnp.float32)
         # data augmentation
-        if aug:
+        if swav:
             obs = {k: jnp.concat([v, v], axis=0) for k, v in obs.items()}
             obs["image"] = jaxutils.random_translate(
                 obs["image"], self.config.aug.max_delta
@@ -278,7 +282,7 @@ class WorldModel(nj.Module):
                 self.config.slow_critic_update,
             )
         self.heads = {}
-        if not config.aug.swav:
+        if not config.aug.swav and config.encoder.cnn != "dino":
             self.heads["decoder"] = nets.MultiDecoder(
                 shapes,
                 decoder_key,
