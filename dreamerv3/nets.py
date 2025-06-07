@@ -269,6 +269,8 @@ class RSSM(nj.Module):
         stats = self._stats("obs_stats", x)
         dist = self.get_dist(stats)
         stoch = dist.sample(seed=nj.rng())
+        if self._classes and self._equiv:
+            stoch = jnp.moveaxis(stoch, -1, -2)
         post = {"stoch": stoch, "deter": prior["deter"], **stats}
         return cast(post), cast(prior)
 
@@ -343,6 +345,8 @@ class RSSM(nj.Module):
         stats = self._stats("img_stats", x)
         dist = self.get_dist(stats)
         stoch = dist.sample(seed=nj.rng())
+        if self._classes and self._equiv:
+            stoch = jnp.moveaxis(stoch, -1, -2)
         prior = {"stoch": stoch, "deter": deter, **stats}
         return cast(prior)
 
