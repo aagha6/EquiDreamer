@@ -810,7 +810,7 @@ class ImageEncoderDINO(nj.Module):
     def __call__(self, x):
         x = jnp.moveaxis(x, -1, 1)
         outputs = self._model(x)
-        return outputs.pooler_output
+        return outputs.pooler_output  # (B, 768)
 
 
 class ImageEncoderResnet(nj.Module):

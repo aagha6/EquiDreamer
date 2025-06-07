@@ -194,6 +194,8 @@ class WorldModel(nj.Module):
         self.act_space = act_space["action"]
         self.config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
+        if self.config.encoder.cnn == "dino":
+            shapes["embed"] = (768,)
         shapes = {k: v for k, v in shapes.items() if not k.startswith("log_")}
         (
             rssm_key,
@@ -282,7 +284,7 @@ class WorldModel(nj.Module):
                 self.config.slow_critic_update,
             )
         self.heads = {}
-        if not config.aug.swav and config.encoder.cnn != "dino":
+        if not config.aug.swav:
             self.heads["decoder"] = nets.MultiDecoder(
                 shapes,
                 decoder_key,
@@ -344,7 +346,9 @@ class WorldModel(nj.Module):
         return prev_latent, prev_action
 
     def train(self, data, state):
-        modules = [self.encoder, self.rssm, *self.heads.values()]
+        modules = [self.rssm, *self.heads.values()]
+        if self.config.encoder.cnn != "dino":
+            modules += [self.encoder]
         if self.config.aug.swav:
             modules += [self._obs_proj]
         mets, (state, outs, metrics) = self.opt(
@@ -367,6 +371,7 @@ class WorldModel(nj.Module):
 
     def loss(self, data, state):
         embed = self.encoder(data)
+        data["embed"] = embed
         prev_latent, prev_action = state
         prev_actions = jnp.concatenate(
             [prev_action[:, None], data["action"][:, :-1]], 1
