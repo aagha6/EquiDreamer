@@ -227,6 +227,8 @@ class RSSM(nj.Module):
     def get_dist(self, state, argmax=False):
         if self._classes:
             logit = state["logit"].astype(f32)
+            if self._equiv:
+                logit = jnp.moveaxis(logit, -1, -2)
             return tfd.Independent(jaxutils.OneHotDist(logit), 1)
         else:
             mean = state["mean"].astype(f32)
@@ -267,6 +269,8 @@ class RSSM(nj.Module):
         stats = self._stats("obs_stats", x)
         dist = self.get_dist(stats)
         stoch = dist.sample(seed=nj.rng())
+        if self._classes and self._equiv:
+            stoch = jnp.moveaxis(stoch, -1, -2)
         post = {"stoch": stoch, "deter": prior["deter"], **stats}
         return cast(post), cast(prior)
 
@@ -341,6 +345,8 @@ class RSSM(nj.Module):
         stats = self._stats("img_stats", x)
         dist = self.get_dist(stats)
         stoch = dist.sample(seed=nj.rng())
+        if self._classes and self._equiv:
+            stoch = jnp.moveaxis(stoch, -1, -2)
         prior = {"stoch": stoch, "deter": deter, **stats}
         return cast(prior)
 
@@ -1770,6 +1776,9 @@ def get_act(name, in_type=None):
     elif name == "equiv_relu":
         assert in_type is not None
         return lambda x: nn.ReLU(in_type=in_type)(x)
+    elif name == "equiv_silu":
+        assert in_type is not None
+        return lambda x: nn.SiLU(in_type=in_type)(x)
     elif name == "mish":
         return lambda x: x * jnp.tanh(jax.nn.softplus(x))
     elif hasattr(jax.nn, name):
