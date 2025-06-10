@@ -194,12 +194,13 @@ class WorldModel(nj.Module):
         (
             rssm_key,
             encoder_key,
+            ema_encoder_key,
             decoder_key,
             reward_key,
             cont_key,
             obs_proj_key,
             slow_obs_proj_key,
-        ) = jax.random.split(key, 7)
+        ) = jax.random.split(key, 8)
         self.encoder = nets.MultiEncoder(
             shapes, encoder_key, **config.encoder, grp=grp, name="enc"
         )
@@ -220,7 +221,7 @@ class WorldModel(nj.Module):
         )
         if config.aug.swav:
             self._ema_encoder = nets.MultiEncoder(
-                shapes, encoder_key, **config.encoder, grp=grp, name="slow_enc"
+                shapes, ema_encoder_key, **config.encoder, grp=grp, name="slow_enc"
             )
             if config.rssm.equiv:
                 gspace = grp.grp_act

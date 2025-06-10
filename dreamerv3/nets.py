@@ -116,9 +116,15 @@ class RSSM(nj.Module):
         self._field_type_inf_in = nn.FieldType(
             gspace, (deter + self.embed_size) * [gspace.regular_repr]
         )
-        img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = (
-            jax.random.split(key, 6)
-        )
+        (
+            img_in_key,
+            img_out_key,
+            obs_out_key,
+            stoch_mean_key_img,
+            stoch_mean_key_obs,
+            gru_key,
+            feat_proj_key,
+        ) = jax.random.split(key, 7)
         if self._num_prototypes:
             if self._classes:
                 self._field_type_feat_proj = nn.FieldType(
@@ -155,12 +161,20 @@ class RSSM(nj.Module):
             kernel_size=1,
             key=obs_out_key,
         )
-        self.init_stoch_mean = nn.R2Conv(
-            in_type=self._field_type_embed,
-            out_type=self._field_type_stoch,
-            kernel_size=1,
-            key=stoch_mean_key,
-        )
+        self.init_stoch_mean = {
+            "img_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=self._field_type_stoch,
+                kernel_size=1,
+                key=stoch_mean_key_img,
+            ),
+            "obs_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=self._field_type_stoch,
+                kernel_size=1,
+                key=stoch_mean_key_obs,
+            ),
+        }
         self._embed_group_pooling = pooling_module(
             self._field_type_embed, name="embed_group_pooling"
         )
@@ -429,7 +443,7 @@ class RSSM(nj.Module):
                     f"{name}",
                     EquivLinear,
                     **{
-                        "net": self.init_stoch_mean,
+                        "net": self.init_stoch_mean[name],
                         "in_type": self._field_type_embed,
                         "out_type": self._field_type_stoch,
                         "norm": "none",
@@ -457,7 +471,7 @@ class RSSM(nj.Module):
                         f"{name}",
                         EquivGRUCell,
                         **{
-                            "net": self.init_stoch_mean,
+                            "net": self.init_stoch_mean[name],
                             "in_type": self._field_type_embed,
                             "out_type": self._field_type_stoch,
                             "act": "none",
