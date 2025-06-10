@@ -164,13 +164,21 @@ class RSSM(nj.Module):
         self.init_stoch_mean = {
             "img_stats": nn.R2Conv(
                 in_type=self._field_type_embed,
-                out_type=self._field_type_stoch + self._field_type_stoch,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
                 kernel_size=1,
                 key=stoch_mean_key_img,
             ),
             "obs_stats": nn.R2Conv(
                 in_type=self._field_type_embed,
-                out_type=self._field_type_stoch + self._field_type_stoch,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
                 kernel_size=1,
                 key=stoch_mean_key_obs,
             ),
