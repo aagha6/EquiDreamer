@@ -164,13 +164,21 @@ class RSSM(nj.Module):
         self.init_stoch_mean = {
             "img_stats": nn.R2Conv(
                 in_type=self._field_type_embed,
-                out_type=self._field_type_stoch,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
                 kernel_size=1,
                 key=stoch_mean_key_img,
             ),
             "obs_stats": nn.R2Conv(
                 in_type=self._field_type_embed,
-                out_type=self._field_type_stoch,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
                 kernel_size=1,
                 key=stoch_mean_key_obs,
             ),
@@ -466,30 +474,21 @@ class RSSM(nj.Module):
             return stats
         else:
             if self._equiv:
-                mean = (
+                x = (
                     self.get(
                         f"{name}",
                         EquivGRUCell,
                         **{
                             "net": self.init_stoch_mean[name],
                             "in_type": self._field_type_embed,
-                            "out_type": self._field_type_stoch,
+                            "out_type": self._field_type_stoch + self._field_type_stoch,
                             "act": "none",
                         },
                     )(x)
                     .tensor.mean(-1)
                     .mean(-1)
                 )
-                x = nn.GeometricTensor(
-                    x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed
-                )
-                x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
-                std = self.get(
-                    "stoch_std",
-                    Linear,
-                    self._stoch * self._factor // self._grp.grp_act.regular_repr.size,
-                )(x)
-                std = jnp.repeat(std, self._grp.grp_act.regular_repr.size, -1)
+                mean, std = jnp.split(x, 2, -1)
             else:
                 x = self.get(name, Linear, 2 * self._stoch)(x)
                 mean, std = jnp.split(x, 2, -1)
