@@ -579,7 +579,7 @@ class VFunction(nj.Module):
         self.config = config
         if config.rssm.equiv:
             net_key, slow_key = jax.random.split(key, 2)
-            self.net = nets.EquivCritic(
+            self.net = nets.EquivMLP(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
@@ -592,7 +592,7 @@ class VFunction(nj.Module):
                 grp=grp,
                 name="net",
             )
-            self.slow = nets.EquivCritic(
+            self.slow = nets.EquivMLP(
                 (),
                 deter=config.rssm["deter"],
                 stoch=(
