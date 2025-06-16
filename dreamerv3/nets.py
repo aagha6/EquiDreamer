@@ -35,6 +35,8 @@ class RSSM(nj.Module):
         stoch=32,
         classes=32,
         unroll=False,
+        sim_norm=False,
+        sim_norm_dim=8,
         initial="learned",
         unimix=0.01,
         action_clip=1.0,
@@ -62,9 +64,12 @@ class RSSM(nj.Module):
         self._sinkhorn_iters = 3
         self._inputs = Input(["stoch", "deter"], dims="deter")
         self._cup_catch = cup_catch
-
+        self._sim_norm = sim_norm
+        self._sim_norm_dim = sim_norm_dim
         self._equiv = equiv
         if self.conv_gru and self._equiv:
+            raise ValueError("both can't be True")
+        if self._classes and self._sim_norm:
             raise ValueError("both can't be True")
         if self._equiv:
             assert embed_size is not None
@@ -293,6 +298,11 @@ class RSSM(nj.Module):
         stoch = dist.sample(seed=nj.rng())
         if self._classes and self._equiv:
             stoch = jnp.moveaxis(stoch, -1, -2)
+        if self._sim_norm:
+            shape = stoch.shape
+            stoch = stoch.reshape(shape[:-1] + (-1, self._sim_norm_dim))
+            stoch = jax.nn.softmax(stoch, -1)
+            stoch = jnp.reshape(stoch, shape)
         post = {"stoch": stoch, "deter": prior["deter"], **stats}
         return cast(post), cast(prior)
 
@@ -369,6 +379,11 @@ class RSSM(nj.Module):
         stoch = dist.sample(seed=nj.rng())
         if self._classes and self._equiv:
             stoch = jnp.moveaxis(stoch, -1, -2)
+        if self._sim_norm:
+            shape = stoch.shape
+            stoch = stoch.reshape(shape[:-1] + (-1, self._sim_norm_dim))
+            stoch = jax.nn.softmax(stoch, -1)
+            stoch = jnp.reshape(stoch, shape)
         prior = {"stoch": stoch, "deter": deter, **stats}
         return cast(prior)
 
