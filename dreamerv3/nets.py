@@ -486,7 +486,7 @@ class RSSM(nj.Module):
             else:
                 x = self.get(name, Linear, 2 * self._stoch)(x)
                 mean, std = jnp.split(x, 2, -1)
-            std = 2 * jax.nn.sigmoid(std / 2) + 0.1
+            std = jax.nn.sigmoid(std / 2) + 0.1
             return {"mean": mean, "std": std}
 
     def _mask(self, value, mask):
