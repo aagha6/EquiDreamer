@@ -44,8 +44,6 @@ class RSSM(nj.Module):
         cup_catch=False,
         **kw,
     ):
-        self._deter = deter
-        self._stoch = stoch
         self._classes = classes
         self._unroll = unroll
         self._initial = initial
@@ -71,12 +69,21 @@ class RSSM(nj.Module):
             self.embed_size = embed_size
             self._grp = grp
             self._factor = self._grp.grp_act.regular_repr.size // self._grp.scaler
+            self._deter = deter // self._factor
+            if self._classes:
+                self._stoch = stoch
+                self._classes = self._classes // self._factor
+            else:
+                self._stoch = stoch // self._factor
             self.init_equiv_nets(key)
+        else:
+            self._deter = deter
+            self._stoch = stoch
 
     def init_equiv_nets(self, key):
         units = self._kw["units"] // self._grp.scaler
-        stoch = self._stoch // self._grp.scaler
-        deter = self._deter // self._grp.scaler
+        stoch = self._stoch
+        deter = self._deter
         gspace = self._grp.grp_act
         if self._classes:
             self._field_type_stoch = nn.FieldType(
@@ -197,16 +204,18 @@ class RSSM(nj.Module):
 
     def initial(self, bs):
         if self._equiv:
-            stoch = self._stoch * self._factor
-            deter = self._deter * self._factor
+            stoch = self._stoch
+            classes = self._classes * self._grp.grp_act.regular_repr.size
+            deter = self._deter * self._grp.grp_act.regular_repr.size
         else:
             stoch = self._stoch
             deter = self._deter
+            classes = self._classes
         if self._classes:
             state = dict(
                 deter=jnp.zeros([bs, deter], f32),
-                logit=jnp.zeros([bs, stoch, self._classes], f32),
-                stoch=jnp.zeros([bs, stoch, self._classes], f32),
+                logit=jnp.zeros([bs, stoch, classes], f32),
+                stoch=jnp.zeros([bs, stoch, classes], f32),
             )
         else:
             state = dict(
@@ -300,11 +309,9 @@ class RSSM(nj.Module):
                 self._action_clip / jnp.maximum(self._action_clip, jnp.abs(prev_action))
             )
         if self._classes:
-            if self._equiv:
-                n_stoch = self._stoch * self._factor
-            else:
-                n_stoch = self._stoch
-            shape = prev_stoch.shape[:-2] + (n_stoch * self._classes,)
+            n_stoch = self._stoch
+            n_classes = self._classes * self._grp.grp_act.regular_repr.size
+            shape = prev_stoch.shape[:-2] + (n_stoch * n_classes,)
             prev_stoch = prev_stoch.reshape(shape)
         if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
             shape = prev_action.shape[:-2] + (np.prod(prev_action.shape[-2:]),)
@@ -452,9 +459,7 @@ class RSSM(nj.Module):
                         "act": "none",
                     },
                 )(x)
-                logit = jnp.stack(
-                    jnp.split(flat_logits, self._stoch * self._factor, -1), 1
-                )
+                logit = jnp.stack(jnp.split(flat_logits, self._stoch, -1), 1)
                 logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
             else:
                 x = self.get(name, Linear, self._stoch * self._classes)(x)
@@ -1236,8 +1241,9 @@ class InvMLP(MLP):
         )
 
         r2_act = grp.grp_act
+        factor = r2_act.regular_repr.size // grp.scaler
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act, (deter // factor + stoch // factor) * [r2_act.regular_repr]
         )
         self.group_pooling = pooling_module(self.feat_type_in, name="group_pooling")
 
@@ -1285,7 +1291,7 @@ class EquivMLP(MLP):
         factor = r2_act.regular_repr.size // grp.scaler
         units = units // factor
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act, (deter // factor + stoch // factor) * [r2_act.regular_repr]
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
         keys = jax.random.split(key, 4)
