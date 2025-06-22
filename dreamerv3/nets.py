@@ -112,7 +112,7 @@ class RSSM(nj.Module):
             )
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
-        self._field_type_img_in = self._field_type_stoch + self._field_type_embed
+        self._field_type_img_in = self._field_type_stoch + self._field_type_act
         self._field_type_inf_in = nn.FieldType(
             gspace, (deter + self.embed_size) * [gspace.regular_repr]
         )
@@ -124,8 +124,7 @@ class RSSM(nj.Module):
             stoch_mean_key_obs,
             gru_key,
             feat_proj_key,
-            act_embed_key,
-        ) = jax.random.split(key, 8)
+        ) = jax.random.split(key, 7)
         if self._num_prototypes:
             if self._classes:
                 self._field_type_feat_proj = nn.FieldType(
@@ -149,12 +148,6 @@ class RSSM(nj.Module):
             out_type=self._field_type_embed,
             kernel_size=1,
             key=img_in_key,
-        )
-        self.init_act_embed = nn.R2Conv(
-            in_type=self._field_type_act,
-            out_type=self._field_type_embed,
-            kernel_size=1,
-            key=act_embed_key,
         )
         self.init_img_out = nn.R2Conv(
             in_type=self._field_type_deter,
@@ -329,21 +322,10 @@ class RSSM(nj.Module):
             prev_stoch = nn.GeometricTensor(
                 prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch
             )
-            act_embed = self.get(
-                "act_embed",
-                EquivLinear,
-                **{
-                    "net": self.init_act_embed,
-                    "in_type": self._field_type_act,
-                    "out_type": self._field_type_embed,
-                    "norm": self._kw["norm"],
-                    "act": "equiv_relu",
-                },
-            )(act)
-            act_embed = nn.GeometricTensor(
-                act_embed[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed
+            act = nn.GeometricTensor(
+                act[:, :, jnp.newaxis, jnp.newaxis], self._field_type_act
             )
-            x = nn.tensor_directsum([prev_stoch, act_embed]).tensor.mean(-1).mean(-1)
+            x = nn.tensor_directsum([prev_stoch, act]).tensor.mean(-1).mean(-1)
             x = self.get(
                 "img_in",
                 EquivLinear,
