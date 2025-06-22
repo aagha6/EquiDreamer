@@ -69,11 +69,7 @@ class RSSM(nj.Module):
             self.embed_size = embed_size
             self._factor = self._grp.grp_act.regular_repr.size // self._grp.scaler
             self._deter = deter // self._factor
-            if self._classes:
-                self._stoch = stoch
-                self._classes = self._classes // self._factor
-            else:
-                self._stoch = stoch // self._factor
+            self._stoch = stoch // self._factor
             self.init_equiv_nets(key)
         else:
             self._deter = deter
@@ -203,18 +199,16 @@ class RSSM(nj.Module):
 
     def initial(self, bs):
         if self._equiv:
-            stoch = self._stoch
-            classes = self._classes * self._grp.grp_act.regular_repr.size
+            stoch = self._stoch * self._grp.grp_act.regular_repr.size
             deter = self._deter * self._grp.grp_act.regular_repr.size
         else:
             stoch = self._stoch
             deter = self._deter
-            classes = self._classes
         if self._classes:
             state = dict(
                 deter=jnp.zeros([bs, deter], f32),
-                logit=jnp.zeros([bs, stoch, classes], f32),
-                stoch=jnp.zeros([bs, stoch, classes], f32),
+                logit=jnp.zeros([bs, stoch, self._classes], f32),
+                stoch=jnp.zeros([bs, stoch, self._classes], f32),
             )
         else:
             state = dict(
@@ -308,11 +302,11 @@ class RSSM(nj.Module):
                 self._action_clip / jnp.maximum(self._action_clip, jnp.abs(prev_action))
             )
         if self._classes:
-            n_stoch = self._stoch
+            n_classes = self._classes
             if self._equiv:
-                n_classes = self._classes * self._grp.grp_act.regular_repr.size
+                n_stoch = self._stoch * self._grp.grp_act.regular_repr.size
             else:
-                n_classes = self._classes
+                n_stoch = self._stoch
             shape = prev_stoch.shape[:-2] + (n_stoch * n_classes,)
             prev_stoch = prev_stoch.reshape(shape)
         if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
@@ -461,7 +455,8 @@ class RSSM(nj.Module):
                         "act": "none",
                     },
                 )(x)
-                logit = jnp.stack(jnp.split(flat_logits, self._stoch, -1), 1)
+                n_stoch = self._stoch * self._grp.grp_act.regular_repr.size
+                logit = jnp.stack(jnp.split(flat_logits, n_stoch, -1), 1)
                 logit = logit.reshape(x.shape[:-1] + logit.shape[-2:])
             else:
                 x = self.get(name, Linear, self._stoch * self._classes)(x)
