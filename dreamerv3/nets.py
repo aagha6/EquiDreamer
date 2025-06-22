@@ -80,7 +80,7 @@ class RSSM(nj.Module):
             self._stoch = stoch
 
     def init_equiv_nets(self, key):
-        units = self._kw["units"] // self._grp.scaler
+        units = self._kw["units"] // self._factor
         stoch = self._stoch
         deter = self._deter
         gspace = self._grp.grp_act
@@ -203,8 +203,11 @@ class RSSM(nj.Module):
 
     def initial(self, bs):
         if self._equiv:
-            stoch = self._stoch
-            classes = self._classes * self._grp.grp_act.regular_repr.size
+            if self._classes:
+                stoch = self._stoch
+                classes = self._classes * self._grp.grp_act.regular_repr.size
+            else:
+                stoch = self._stoch * self._grp.grp_act.regular_repr.size
             deter = self._deter * self._grp.grp_act.regular_repr.size
         else:
             stoch = self._stoch
