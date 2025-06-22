@@ -60,14 +60,13 @@ class RSSM(nj.Module):
         self._sinkhorn_iters = 3
         self._inputs = Input(["stoch", "deter"], dims="deter")
         self._cup_catch = cup_catch
-
+        self._grp = grp
         self._equiv = equiv
         if self.conv_gru and self._equiv:
             raise ValueError("both can't be True")
         if self._equiv:
             assert embed_size is not None
             self.embed_size = embed_size
-            self._grp = grp
             self._factor = self._grp.grp_act.regular_repr.size // self._grp.scaler
             self._deter = deter // self._factor
             if self._classes:
@@ -310,7 +309,10 @@ class RSSM(nj.Module):
             )
         if self._classes:
             n_stoch = self._stoch
-            n_classes = self._classes * self._grp.grp_act.regular_repr.size
+            if self._equiv:
+                n_classes = self._classes * self._grp.grp_act.regular_repr.size
+            else:
+                n_classes = self._classes
             shape = prev_stoch.shape[:-2] + (n_stoch * n_classes,)
             prev_stoch = prev_stoch.reshape(shape)
         if len(prev_action.shape) > len(prev_stoch.shape):  # 2D actions.
