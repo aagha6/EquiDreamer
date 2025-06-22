@@ -421,8 +421,18 @@ class RSSM(nj.Module):
             .mean(-1)
         )
         reset, cand, update = jnp.split(gru_out, 3, -1)
-        reset = jax.nn.sigmoid(reset)
-        cand = jnp.tanh(reset * cand)
+        w_r = self.get(
+            "w_r",
+            Initializer(scale=0.0),
+            (self._deter, self._deter),
+        )
+        w_c = self.get(
+            "w_c",
+            Initializer(scale=0.0),
+            (self._deter, self._deter),
+        )
+        reset = jax.nn.sigmoid(reset + deter @ w_r)
+        cand = jnp.tanh(reset * cand + deter @ w_c)
         update = jax.nn.sigmoid(update - 1)
         deter = update * cand + (1 - update) * deter
         return deter, deter
