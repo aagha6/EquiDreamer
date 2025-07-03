@@ -1,6 +1,7 @@
 import functools
 import re
 
+from functools import partial
 import jax
 import jax.numpy as jnp
 import equinox as eqx
@@ -686,6 +687,8 @@ class MultiEncoder(nj.Module):
             self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
         elif cnn == "equiv":
             self._cnn = EquivImageEncoder(cnn_depth, grp=grp, key=key, **cnn_kw)
+        elif cnn == "equiv_7x7":
+            self._cnn = Equiv7x7Encoder(cnn_depth, grp=grp, key=key, **cnn_kw)
         if self.mlp_shapes:
             self._mlp = MLP(None, mlp_layers, mlp_units, dist="none", **mlp_kw)
 
@@ -952,6 +955,162 @@ class EquivImageEncoder(nj.Module):
         x = self.equiv_relu_linear(x)
         x = x.tensor.reshape((x.shape[0], -1))
         return x
+
+
+class Equiv7x7Encoder(nj.Module):
+
+    def __init__(self, depth, grp, key, **kw):
+        gspace = grp.grp_act
+        self.gspace = gspace
+        depth = depth // grp.scaler
+        out_dim = depth * 2**4
+        self.repr_shape = (out_dim, 6, 6)
+        self.repr_dim = np.prod(self.repr_shape)
+
+        self.out_type = nn.FieldType(self.gspace, out_dim * [self.gspace.regular_repr])
+        self.flat_type = nn.FieldType(
+            self.gspace,
+            self.gspace.fibergroup.order() * self.repr_dim * [self.gspace.regular_repr],
+        )
+        self.flat_out_type = nn.FieldType(
+            self.gspace, self.repr_dim * [self.gspace.regular_repr]
+        )
+
+        self.feat_type_in = nn.FieldType(gspace, 3 * [gspace.trivial_repr])
+        self.feat_type_out1 = nn.FieldType(gspace, depth * [gspace.regular_repr])
+        depth *= 2
+        self.feat_type_out2 = nn.FieldType(gspace, depth * [gspace.regular_repr])
+        depth *= 2
+        self.feat_type_out3 = nn.FieldType(gspace, depth * [gspace.regular_repr])
+        depth *= 2
+        self.feat_type_out4 = nn.FieldType(gspace, depth * [gspace.regular_repr])
+        depth *= 2
+        self.feat_type_out5 = nn.FieldType(gspace, depth * [gspace.regular_repr])
+
+        keys = jax.random.split(key, 6)
+        self.escnn1 = econv_module(
+            in_type=self.feat_type_in,
+            out_type=self.feat_type_out1,
+            kernel_size=4,
+            stride=2,
+            key=keys[0],
+            name="s1conv",
+        )
+        self.equiv_relu1 = nn.ReLU(self.feat_type_out1)
+        self.escnn2 = econv_module(
+            in_type=self.feat_type_out1,
+            out_type=self.feat_type_out2,
+            kernel_size=5,
+            stride=2,
+            key=keys[1],
+            name="s2conv",
+        )
+        self.equiv_relu2 = nn.ReLU(self.feat_type_out2)
+        self.escnn3 = econv_module(
+            in_type=self.feat_type_out2,
+            out_type=self.feat_type_out3,
+            kernel_size=5,
+            stride=1,
+            key=keys[2],
+            name="s3conv",
+        )
+        self.equiv_relu3 = nn.ReLU(self.feat_type_out3)
+        self.escnn4 = econv_module(
+            in_type=self.feat_type_out3,
+            out_type=self.feat_type_out4,
+            kernel_size=3,
+            stride=1,
+            key=keys[3],
+            name="s4conv",
+        )
+        self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
+        self.escnn5 = econv_module(
+            in_type=self.feat_type_out4,
+            out_type=self.feat_type_out5,
+            kernel_size=3,
+            stride=1,
+            key=keys[4],
+            name="s5conv",
+        )
+        self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
+
+        self.last = econv_module(
+            in_type=self.flat_type,
+            out_type=self.flat_out_type,
+            kernel_size=1,
+            stride=1,
+            key=keys[5],
+            name="last",
+        )
+        self.equiv_relu_last = nn.ReLU(self.flat_out_type)
+        self.basespace_transforms = self.precompute()
+
+    def precompute(self):
+        # Precalculate inverse of basespace transforms
+        if self.gspace.fibergroup.name == "C2":
+            basespace_transforms = [
+                lambda x: x,  # inverse of (0)
+                partial(jnp.flip, axis=(-1,)),  # inverse of (1)
+            ]
+        elif self.gspace.fibergroup.name == "D2":
+            basespace_transforms = [
+                lambda x: x,  # inverse of (0, 0)
+                partial(jnp.rot90, k=2, axis=(-2, -1)),  # inverse of (0, 1)
+                partial(jnp.flip, axis=(-1,)),  # inverse of (1, 0)
+                partial(jnp.flip, axis=(-2,)),  # inverse of (1, 1)
+            ]
+        else:
+            raise NotImplementedError("only implemented for groups C2,D2")
+
+        return basespace_transforms
+
+    def __call__(self, x):
+        x = jaxutils.cast_to_compute(x) - 0.5
+        x = jnp.moveaxis(x, -1, 1)
+        x = nn.GeometricTensor(x, self.feat_type_in)
+        x = self.escnn1(x)
+        x = self.equiv_relu1(x)
+        x = self.escnn2(x)
+        x = self.equiv_relu2(x)
+        x = self.escnn3(x)
+        x = self.equiv_relu3(x)
+        x = self.escnn4(x)
+        x = self.equiv_relu4(x)
+        x = self.escnn5(x)
+        x = self.equiv_relu5(x)
+
+        x = self.restrict_functor(x)
+        x = self.last(x)
+
+        x = self.equiv_relu_last(x)
+        x = x.tensor.reshape((x.shape[0], -1))
+        return x
+
+    def diff_transform(self, input, element, basespace_transform):
+        input_tensor = input.tensor
+
+        # Fibergroup
+        representation = input.type.fiber_representation(element)
+        output = jnp.einsum("oi,bi...->bo...", representation, input_tensor)
+
+        # Basespace
+        output = basespace_transform(output)
+
+        return output
+
+    def restrict_functor(self, h):
+        ginv_x = []
+        for g, bs_trans in zip(self.gspace.testing_elements, self.basespace_transforms):
+            # Need to use g_inverse
+            val = self.diff_transform(h, ~g, bs_trans)
+            ginv_x.append(val)
+
+        ginv_x = jnp.stack(ginv_x, axis=-1)
+
+        ginv_x = ginv_x.reshape((ginv_x.shape[0], -1, 1, 1))
+        ginv_x = nn.GeometricTensor(ginv_x, self.flat_type)
+
+        return ginv_x
 
 
 class EquivImageDecoder(nj.Module):
