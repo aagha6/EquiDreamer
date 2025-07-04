@@ -964,7 +964,7 @@ class Equiv7x7Encoder(nj.Module):
         self.gspace = gspace
         depth = depth // grp.scaler
         out_dim = depth * 2**4
-        self.repr_shape = (out_dim, 6, 6)
+        self.repr_shape = (out_dim, kw["minres"], kw["minres"])
         self.repr_dim = np.prod(self.repr_shape)
 
         self.out_type = nn.FieldType(self.gspace, out_dim * [self.gspace.regular_repr])
@@ -1018,7 +1018,7 @@ class Equiv7x7Encoder(nj.Module):
         self.escnn4 = econv_module(
             in_type=self.feat_type_out3,
             out_type=self.feat_type_out4,
-            kernel_size=3,
+            kernel_size=5,
             stride=1,
             key=keys[3],
             name="s4conv",
