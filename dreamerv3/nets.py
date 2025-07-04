@@ -984,8 +984,6 @@ class Equiv7x7Encoder(nj.Module):
         self.feat_type_out3 = nn.FieldType(gspace, depth * [gspace.regular_repr])
         depth *= 2
         self.feat_type_out4 = nn.FieldType(gspace, depth * [gspace.regular_repr])
-        depth *= 2
-        self.feat_type_out5 = nn.FieldType(gspace, depth * [gspace.regular_repr])
 
         keys = jax.random.split(key, 6)
         self.escnn1 = econv_module(
@@ -1009,8 +1007,9 @@ class Equiv7x7Encoder(nj.Module):
         self.escnn3 = econv_module(
             in_type=self.feat_type_out2,
             out_type=self.feat_type_out3,
-            kernel_size=5,
-            stride=1,
+            kernel_size=4,
+            stride=2,
+            padding=1,
             key=keys[2],
             name="s3conv",
         )
@@ -1018,21 +1017,12 @@ class Equiv7x7Encoder(nj.Module):
         self.escnn4 = econv_module(
             in_type=self.feat_type_out3,
             out_type=self.feat_type_out4,
-            kernel_size=5,
+            kernel_size=4,
             stride=1,
             key=keys[3],
             name="s4conv",
         )
         self.equiv_relu4 = nn.ReLU(self.feat_type_out4)
-        self.escnn5 = econv_module(
-            in_type=self.feat_type_out4,
-            out_type=self.feat_type_out5,
-            kernel_size=3,
-            stride=1,
-            key=keys[4],
-            name="s5conv",
-        )
-        self.equiv_relu5 = nn.ReLU(self.feat_type_out5)
 
         self.last = econv_module(
             in_type=self.flat_type,
@@ -1076,14 +1066,12 @@ class Equiv7x7Encoder(nj.Module):
         x = self.equiv_relu3(x)
         x = self.escnn4(x)
         x = self.equiv_relu4(x)
-        x = self.escnn5(x)
-        x = self.equiv_relu5(x)
 
-        x = self.restrict_functor(x)
-        x = self.last(x)
+        # x = self.restrict_functor(x)
+        # x = self.last(x)
 
-        x = self.equiv_relu_last(x)
-        x = x.tensor.reshape((x.shape[0], -1))
+        # x = self.equiv_relu_last(x)
+        # x = x.tensor.reshape((x.shape[0], -1))
         return x
 
     def diff_transform(self, input, element, basespace_transform):

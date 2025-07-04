@@ -209,7 +209,7 @@ class WorldModel(nj.Module):
         if config.rssm.equiv:
             embed_size = (
                 config.encoder.cnn_depth
-                * (2**4)
+                * (2**3)
                 * config.encoder["minres"]
                 * config.encoder["minres"]
                 // grp.scaler
