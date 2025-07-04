@@ -1009,7 +1009,6 @@ class Equiv7x7Encoder(nj.Module):
             out_type=self.feat_type_out3,
             kernel_size=4,
             stride=2,
-            padding=1,
             key=keys[2],
             name="s3conv",
         )
