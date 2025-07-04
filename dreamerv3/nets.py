@@ -963,7 +963,7 @@ class Equiv7x7Encoder(nj.Module):
         gspace = grp.grp_act
         self.gspace = gspace
         depth = depth // grp.scaler
-        out_dim = depth * 2**4
+        out_dim = depth * 2**3
         self.repr_shape = (out_dim, kw["minres"], kw["minres"])
         self.repr_dim = np.prod(self.repr_shape)
 
@@ -1067,11 +1067,11 @@ class Equiv7x7Encoder(nj.Module):
         x = self.escnn4(x)
         x = self.equiv_relu4(x)
 
-        # x = self.restrict_functor(x)
-        # x = self.last(x)
+        x = self.restrict_functor(x)
+        x = self.last(x)
 
-        # x = self.equiv_relu_last(x)
-        # x = x.tensor.reshape((x.shape[0], -1))
+        x = self.equiv_relu_last(x)
+        x = x.tensor.reshape((x.shape[0], -1))
         return x
 
     def diff_transform(self, input, element, basespace_transform):
