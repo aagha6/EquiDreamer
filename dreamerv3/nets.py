@@ -1288,7 +1288,7 @@ class EquivMLP(MLP):
             r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
-        keys = jax.random.split(key, 4)
+        keys = jax.random.split(key, 3)
         self.escnn1 = econv_module(
             in_type=self.feat_type_in,
             out_type=self.feat_type_hidden,
@@ -1338,15 +1338,9 @@ class EquivMLP(MLP):
             self._field_std_type = nn.FieldType(gspace, act_dim * [r2_act.trivial_repr])
             self._init_equiv_actor = nn.R2Conv(
                 in_type=self.feat_type_hidden,
-                out_type=self._field_out_type,
+                out_type=self._field_out_type + self._field_std_type,
                 kernel_size=1,
                 key=keys[2],
-            )
-            self._init_equiv_std = nn.R2Conv(
-                in_type=self.feat_type_hidden,
-                out_type=self._field_std_type,
-                kernel_size=1,
-                key=keys[3],
             )
             self.group_pooling = None
         self.invariant = invariant
@@ -1388,7 +1382,6 @@ class EquivMLP(MLP):
             self._dist["out_type"] = self._field_out_type
             self._dist["std_type"] = self._field_std_type
             self._dist["init_equiv_actor"] = self._init_equiv_actor
-            self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
         return self.get(f"dist_{name}", Dist, shape, **self._dist)(x)
@@ -1410,7 +1403,6 @@ class Dist(nj.Module):
         out_type=None,
         std_type=None,
         init_equiv_actor=None,
-        init_equiv_std=None,
         group_pooling=None,
         cup_catch=False,
     ):
@@ -1433,7 +1425,6 @@ class Dist(nj.Module):
             self._field_out_type = out_type
             self._field_std_type = std_type
             self._init_equiv_actor = init_equiv_actor
-            self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
             self._group_pooling = group_pooling
 
@@ -1460,22 +1451,13 @@ class Dist(nj.Module):
                 **{
                     "net": self._init_equiv_actor,
                     "in_type": self._field_in_type,
-                    "out_type": self._field_out_type,
+                    "out_type": self._field_out_type + self._field_std_type,
                     "norm": "none",
                     "act": "none",
                 },
             )(inputs.reshape([-1, inputs.shape[-1]]))
-            std = self.get(
-                "std",
-                EquivLinear,
-                **{
-                    "net": self._init_equiv_std,
-                    "in_type": self._field_in_type,
-                    "out_type": self._field_std_type,
-                    "norm": "none",
-                    "act": "none",
-                },
-            )(inputs.reshape([-1, inputs.shape[-1]]))
+            out = out[..., : -self._field_std_type.size]
+            std = out[..., -self._field_std_type.size :]
             out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
             std = std.reshape(inputs.shape[:-1] + (std.shape[-1],)).astype(f32)
         else:
