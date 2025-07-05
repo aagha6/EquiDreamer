@@ -117,9 +117,15 @@ class RSSM(nj.Module):
         self._field_type_inf_in = nn.FieldType(
             gspace, (deter + self.embed_size) * [gspace.regular_repr]
         )
-        img_in_key, img_out_key, obs_out_key, stoch_mean_key, gru_key, feat_proj_key = (
-            jax.random.split(key, 6)
-        )
+        (
+            img_in_key,
+            img_out_key,
+            obs_out_key,
+            stoch_mean_key_img,
+            stoch_mean_key_obs,
+            gru_key,
+            feat_proj_key,
+        ) = jax.random.split(key, 7)
         if self._num_prototypes:
             if self._classes:
                 self._field_type_feat_proj = nn.FieldType(
@@ -156,12 +162,28 @@ class RSSM(nj.Module):
             kernel_size=1,
             key=obs_out_key,
         )
-        self.init_stoch_mean = nn.R2Conv(
-            in_type=self._field_type_embed,
-            out_type=self._field_type_stoch,
-            kernel_size=1,
-            key=stoch_mean_key,
-        )
+        self.init_stoch_mean = {
+            "img_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
+                kernel_size=1,
+                key=stoch_mean_key_img,
+            ),
+            "obs_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
+                kernel_size=1,
+                key=stoch_mean_key_obs,
+            ),
+        }
         self._embed_group_pooling = pooling_module(
             self._field_type_embed, name="embed_group_pooling"
         )
@@ -424,7 +446,7 @@ class RSSM(nj.Module):
                     f"{name}",
                     EquivLinear,
                     **{
-                        "net": self.init_stoch_mean,
+                        "net": self.init_stoch_mean[name],
                         "in_type": self._field_type_embed,
                         "out_type": self._field_type_stoch,
                         "norm": "none",
@@ -447,30 +469,21 @@ class RSSM(nj.Module):
             return stats
         else:
             if self._equiv:
-                mean = (
+                x = (
                     self.get(
                         f"{name}",
                         EquivGRUCell,
                         **{
-                            "net": self.init_stoch_mean,
+                            "net": self.init_stoch_mean[name],
                             "in_type": self._field_type_embed,
-                            "out_type": self._field_type_stoch,
+                            "out_type": self._field_type_stoch + self._field_type_stoch,
                             "act": "none",
                         },
                     )(x)
                     .tensor.mean(-1)
                     .mean(-1)
                 )
-                x = nn.GeometricTensor(
-                    x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed
-                )
-                x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
-                std = self.get(
-                    "stoch_std",
-                    Linear,
-                    self._stoch * self._factor // self._grp.grp_act.regular_repr.size,
-                )(x)
-                std = jnp.repeat(std, self._grp.grp_act.regular_repr.size, -1)
+                mean, std = jnp.split(x, 2, -1)
             else:
                 x = self.get(name, Linear, 2 * self._stoch)(x)
                 mean, std = jnp.split(x, 2, -1)
@@ -1289,7 +1302,7 @@ class EquivMLP(MLP):
             r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
-        keys = jax.random.split(key, 3)
+        keys = jax.random.split(key, 4)
         self.escnn1 = econv_module(
             in_type=self.feat_type_in,
             out_type=self.feat_type_hidden,
@@ -1304,10 +1317,12 @@ class EquivMLP(MLP):
             key=keys[1],
             name="s2conv",
         )
-        self.group_pooling = pooling_module(self.feat_type_hidden, name="group_pooling")
         if invariant:
             self._field_out_type = None
             self._init_equiv_actor = None
+            self.group_pooling = pooling_module(
+                self.feat_type_hidden, name="group_pooling"
+            )
         else:
             assert isinstance(shape, tuple)
             gspace = grp.grp_act
@@ -1329,15 +1344,25 @@ class EquivMLP(MLP):
                 )
             else:
                 raise NotImplementedError("only implemented for groups C2,D2")
-            self._field_std_type = nn.FieldType(
-                gspace, shape[0] * [r2_act.trivial_repr]
-            )
+            act_dim = None
+            if cup_catch:
+                act_dim = 2
+            else:
+                act_dim = shape[0]
+            self._field_std_type = nn.FieldType(gspace, act_dim * [r2_act.trivial_repr])
             self._init_equiv_actor = nn.R2Conv(
                 in_type=self.feat_type_hidden,
                 out_type=self._field_out_type,
                 kernel_size=1,
                 key=keys[2],
             )
+            self._init_equiv_std = nn.R2Conv(
+                in_type=self.feat_type_hidden,
+                out_type=self._field_std_type,
+                kernel_size=1,
+                key=keys[3],
+            )
+            self.group_pooling = None
         self.invariant = invariant
         self.equiv_relu = nn.ReLU(self.feat_type_hidden)
         self._cup_catch = cup_catch
@@ -1375,7 +1400,9 @@ class EquivMLP(MLP):
         if self._dist["dist"] == "equiv_normal":
             self._dist["in_type"] = self.feat_type_hidden
             self._dist["out_type"] = self._field_out_type
+            self._dist["std_type"] = self._field_std_type
             self._dist["init_equiv_actor"] = self._init_equiv_actor
+            self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
         return self.get(f"dist_{name}", Dist, shape, **self._dist)(x)
@@ -1395,7 +1422,9 @@ class Dist(nj.Module):
         bins=255,
         in_type=None,
         out_type=None,
+        std_type=None,
         init_equiv_actor=None,
+        init_equiv_std=None,
         group_pooling=None,
         cup_catch=False,
     ):
@@ -1416,7 +1445,9 @@ class Dist(nj.Module):
             )
             self._field_in_type = in_type
             self._field_out_type = out_type
+            self._field_std_type = std_type
             self._init_equiv_actor = init_equiv_actor
+            self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
             self._group_pooling = group_pooling
 
@@ -1448,20 +1479,23 @@ class Dist(nj.Module):
                     "act": "none",
                 },
             )(inputs.reshape([-1, inputs.shape[-1]]))
+            std = self.get(
+                "std",
+                EquivLinear,
+                **{
+                    "net": self._init_equiv_std,
+                    "in_type": self._field_in_type,
+                    "out_type": self._field_std_type,
+                    "norm": "none",
+                    "act": "none",
+                },
+            )(inputs.reshape([-1, inputs.shape[-1]]))
             out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
+            std = std.reshape(inputs.shape[:-1] + (std.shape[-1],)).astype(f32)
         else:
             out = self.get("out", Linear, int(np.prod(shape)), **kw)(inputs)
             out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
-        if self._dist == "equiv_normal":
-            pooled_inputs = inputs.reshape([-1, inputs.shape[-1]])
-            pooled_inputs = nn.GeometricTensor(
-                pooled_inputs[:, :, jnp.newaxis, jnp.newaxis], self._field_in_type
-            )
-            pooled_inputs = self._group_pooling(pooled_inputs).tensor.mean(-1).mean(-1)
-            inputs = pooled_inputs.reshape(
-                inputs.shape[:-1] + (pooled_inputs.shape[-1],)
-            )
-        if self._dist in ("equiv_normal", "normal", "trunc_normal"):
+        if self._dist in ("normal", "trunc_normal"):
             std = self.get("std", Linear, int(np.prod(self._shape)), **kw)(inputs)
             std = std.reshape(inputs.shape[:-1] + self._shape).astype(f32)
         if self._dist == "symlog_mse":
