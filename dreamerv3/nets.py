@@ -165,6 +165,28 @@ class RSSM(nj.Module):
             kernel_size=1,
             key=obs_out_key,
         )
+        self.init_stoch_mean = {
+            "img_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
+                kernel_size=1,
+                key=stoch_mean_key_img,
+            ),
+            "obs_stats": nn.R2Conv(
+                in_type=self._field_type_embed,
+                out_type=(
+                    self._field_type_stoch
+                    if self._classes
+                    else self._field_type_stoch + self._field_type_stoch
+                ),
+                kernel_size=1,
+                key=stoch_mean_key_obs,
+            ),
+        }
         self._embed_group_pooling = pooling_module(
             self._field_type_embed, name="embed_group_pooling"
         )
@@ -415,13 +437,21 @@ class RSSM(nj.Module):
         return deter, deter
 
     def _stats(self, name, x):
-        if self._equiv:
-            x = nn.GeometricTensor(
-                x[:, :, jnp.newaxis, jnp.newaxis], self._field_type_embed
-            )
-            x = self._embed_group_pooling(x).tensor.mean(-1).mean(-1)
         if self._classes:
-            x = self.get(name, Linear, self._stoch * self._classes)(x)
+            if self._equiv:
+                x = self.get(
+                    f"{name}",
+                    EquivLinear,
+                    **{
+                        "net": self.init_stoch_mean[name],
+                        "in_type": self._field_type_embed,
+                        "out_type": self._field_type_stoch,
+                        "norm": "none",
+                        "act": "none",
+                    },
+                )(x)
+            else:
+                x = self.get(name, Linear, self._stoch * self._classes)(x)
             logit = x.reshape(x.shape[:-1] + (self._stoch, self._classes))
             if self._unimix:
                 probs = jax.nn.softmax(logit, -1)
@@ -431,8 +461,25 @@ class RSSM(nj.Module):
             stats = {"logit": logit}
             return stats
         else:
-            x = self.get(name, Linear, 2 * self._stoch)(x)
-            mean, std = jnp.split(x, 2, -1)
+            if self._equiv:
+                x = (
+                    self.get(
+                        f"{name}",
+                        EquivGRUCell,
+                        **{
+                            "net": self.init_stoch_mean[name],
+                            "in_type": self._field_type_embed,
+                            "out_type": self._field_type_stoch + self._field_type_stoch,
+                            "act": "none",
+                        },
+                    )(x)
+                    .tensor.mean(-1)
+                    .mean(-1)
+                )
+                mean, std = jnp.split(x, 2, -1)
+            else:
+                x = self.get(name, Linear, 2 * self._stoch)(x)
+                mean, std = jnp.split(x, 2, -1)
             std = 2 * jax.nn.sigmoid(std / 2) + 0.1
             return {"mean": mean, "std": std}
 
