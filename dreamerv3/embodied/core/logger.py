@@ -147,9 +147,14 @@ class JSONLOutput(AsyncOutput):
 
     def _write(self, summaries):
         bystep = collections.defaultdict(dict)
+        scores = []
         for step, name, value in summaries:
             if len(value.shape) == 0 and self._pattern.search(name):
                 bystep[step][name] = float(value)
+            if name == "eval_episode/score":
+                scores.append(float(value))
+        if step % 1000 == 0:
+            bystep[step]["eval_episode/score"] = np.mean(scores).item()
         lines = "".join(
             [
                 json.dumps({"step": step, **scalars}) + "\n"
@@ -238,15 +243,15 @@ class TensorBoardOutput(AsyncOutput):
 
 class WandBOutput:
 
-    def __init__(self, pattern, logdir, config):
+    def __init__(self, name, config, pattern=r".*"):
         self._pattern = re.compile(pattern)
         import wandb
 
         wandb.init(
-            project="dreamerv3",
-            name=logdir.name,
+            project=config.wandb_project,
+            name=f"{config.wandb_name}_{config.task}_{config.seed}",
             # sync_tensorboard=True,,
-            entity="word-bots",
+            entity="ahmedagha-northeastern-university",
             config=dict(config),
         )
         self._wandb = wandb
@@ -257,7 +262,7 @@ class WandBOutput:
         for step, name, value in summaries:
             if len(value.shape) == 0 and self._pattern.search(name):
                 bystep[step][name] = float(value)
-            elif len(value.shape) == 1:
+            """elif len(value.shape) == 1:
                 bystep[step][name] = wandb.Histogram(value)
             elif len(value.shape) == 2:
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
@@ -274,7 +279,7 @@ class WandBOutput:
                 # If the video is a float, convert it to uint8
                 if np.issubdtype(value.dtype, np.floating):
                     value = np.clip(255 * value, 0, 255).astype(np.uint8)
-                bystep[step][name] = wandb.Video(value)
+                bystep[step][name] = wandb.Video(value)"""
 
         for step, metrics in bystep.items():
             self._wandb.log(metrics, step=step)
