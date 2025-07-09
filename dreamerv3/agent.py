@@ -172,7 +172,7 @@ class Agent(nj.Module):
         for key, value in obs.items():
             if key.startswith("log_") or key in ("key",):
                 continue
-            if len(value.shape) > 3 and value.dtype == jnp.uint8 and not dino:
+            if len(value.shape) > 3 and value.dtype == jnp.uint8:
                 value = jaxutils.cast_to_compute(value) / 255.0
             else:
                 value = value.astype(jnp.float32)
@@ -194,8 +194,6 @@ class WorldModel(nj.Module):
         self.act_space = act_space["action"]
         self.config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
-        if self.config.encoder.cnn == "dino":
-            shapes["embed"] = (768,)
         shapes = {k: v for k, v in shapes.items() if not k.startswith("log_")}
         (
             rssm_key,
@@ -372,7 +370,6 @@ class WorldModel(nj.Module):
 
     def loss(self, data, state):
         embed = self.encoder(data)
-        data["embed"] = embed
         prev_latent, prev_action = state
         prev_actions = jnp.concatenate(
             [prev_action[:, None], data["action"][:, :-1]], 1

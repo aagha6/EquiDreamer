@@ -7,7 +7,7 @@ import equinox as eqx
 import escnn_jax.nn as nn
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
-from transformers import FlaxDinov2Model
+from transformers import FlaxResNetModel
 
 f32 = jnp.float32
 tfd = tfp.distributions
@@ -818,12 +818,11 @@ class MultiDecoder(nj.Module):
 class ImageEncoderDINO(nj.Module):
 
     def __init__(self):
-        self._model = FlaxDinov2Model.from_pretrained("facebook/dinov2-base")
+        self._model = FlaxResNetModel.from_pretrained("microsoft/resnet-26")
 
     def __call__(self, x):
-        x = jnp.moveaxis(x, -1, 1)
         outputs = self._model(x)
-        return outputs.pooler_output  # (B, 768)
+        return outputs.pooler_output
 
 
 class ImageEncoderResnet(nj.Module):
