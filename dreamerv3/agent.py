@@ -194,6 +194,7 @@ class WorldModel(nj.Module):
         self.act_space = act_space["action"]
         self.config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
+        shapes["embed"] = (2048,)
         shapes = {k: v for k, v in shapes.items() if not k.startswith("log_")}
         (
             rssm_key,
@@ -370,6 +371,8 @@ class WorldModel(nj.Module):
 
     def loss(self, data, state):
         embed = self.encoder(data)
+        if self.config.decoder.mlp_keys == "embed":
+            data["embed"] = embed
         prev_latent, prev_action = state
         prev_actions = jnp.concatenate(
             [prev_action[:, None], data["action"][:, :-1]], 1
