@@ -62,8 +62,8 @@ class Agent(nj.Module):
             elif "reacher" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
         wm_key, beh_key = jax.random.split(key, 2)
-        if self.config.aug.swav and self.config.encoder.cnn == "dino":
-            raise ValueError("swav and dino cannot be used together.")
+        if self.config.decoder.mlp_keys == "embed" and self.config.aug.swav:
+            raise ValueError("decoding embedding and swav")
         self.wm = WorldModel(
             obs_space,
             act_space,
@@ -101,7 +101,7 @@ class Agent(nj.Module):
 
     def policy(self, obs, state, mode="train"):
         self.config.jax.jit and print("Tracing policy function.")
-        obs = self.preprocess(obs, swav=False, dino=self.config.encoder.cnn == "dino")
+        obs = self.preprocess(obs, swav=False)
         (prev_latent, prev_action), task_state, expl_state = state
         embed = self.wm.encoder(obs)
         latent, _ = self.wm.rssm.obs_step(
@@ -128,9 +128,7 @@ class Agent(nj.Module):
     def train(self, data, state):
         self.config.jax.jit and print("Tracing train function.")
         metrics = {}
-        data = self.preprocess(
-            data, swav=self.config.aug.swav, dino=self.config.encoder.cnn == "dino"
-        )
+        data = self.preprocess(data, swav=self.config.aug.swav)
         if self.config.aug.swav:
             prev_latent, prev_action = state
             prev_latent = {
@@ -157,7 +155,7 @@ class Agent(nj.Module):
 
     def report(self, data):
         self.config.jax.jit and print("Tracing report function.")
-        data = self.preprocess(data, dino=self.config.encoder.cnn == "dino")
+        data = self.preprocess(data)
         report = {}
         report.update(self.wm.report(data))
         mets = self.task_behavior.report(data)
@@ -167,7 +165,7 @@ class Agent(nj.Module):
             report.update({f"expl_{k}": v for k, v in mets.items()})
         return report
 
-    def preprocess(self, obs, swav=False, dino=False):
+    def preprocess(self, obs, swav=False):
         obs = obs.copy()
         for key, value in obs.items():
             if key.startswith("log_") or key in ("key",):
@@ -225,9 +223,12 @@ class WorldModel(nj.Module):
             num_prototypes=num_prototypes if config.aug.swav else None,
         )
         if config.aug.swav:
-            self._ema_encoder = nets.MultiEncoder(
-                shapes, ema_encoder_key, **config.encoder, grp=grp, name="slow_enc"
-            )
+            if self.config.encoder.cnn == "dino":
+                self._ema_encoder = self.encoder
+            else:
+                self._ema_encoder = nets.MultiEncoder(
+                    shapes, ema_encoder_key, **config.encoder, grp=grp, name="slow_enc"
+                )
             if config.rssm.equiv:
                 gspace = grp.grp_act
                 field_type_proj_in = nn.FieldType(
@@ -271,12 +272,13 @@ class WorldModel(nj.Module):
                     units=config.rssm.proto, name="ema_proj"
                 )
 
-            self._encoder_updater = jaxutils.SlowUpdater(
-                self.encoder,
-                self._ema_encoder,
-                self.config.slow_critic_fraction,
-                self.config.slow_critic_update,
-            )
+            if self.config.encoder.cnn != "dino":
+                self._encoder_updater = jaxutils.SlowUpdater(
+                    self.encoder,
+                    self._ema_encoder,
+                    self.config.slow_critic_fraction,
+                    self.config.slow_critic_update,
+                )
             self._proj_updater = jaxutils.SlowUpdater(
                 self._obs_proj,
                 self._ema_obs_proj,
@@ -356,7 +358,8 @@ class WorldModel(nj.Module):
         )
         metrics.update(mets)
         if self.config.aug.swav:
-            self._encoder_updater()
+            if self.config.encoder.cnn != "dino":
+                self._encoder_updater()
             self._proj_updater()
         return state, outs, metrics
 
