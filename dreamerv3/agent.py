@@ -210,7 +210,10 @@ class WorldModel(nj.Module):
 
         embed_size = None
         if config.rssm.equiv:
-            embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
+            if self.config.encoder.cnn == "frame_averaging":
+                embed_size = 2048
+            else:
+                embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
         num_prototypes = config.batch_size * config.batch_length
         self.rssm = nets.RSSM(
             rssm_key,
@@ -223,7 +226,7 @@ class WorldModel(nj.Module):
             num_prototypes=num_prototypes if config.aug.swav else None,
         )
         if config.aug.swav:
-            if self.config.encoder.cnn == "dino":
+            if self.config.encoder.cnn in ["pretrained", "frame_averaging"]:
                 self._ema_encoder = self.encoder
             else:
                 self._ema_encoder = nets.MultiEncoder(
@@ -272,7 +275,7 @@ class WorldModel(nj.Module):
                     units=config.rssm.proto, name="ema_proj"
                 )
 
-            if self.config.encoder.cnn != "dino":
+            if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
                 self._encoder_updater = jaxutils.SlowUpdater(
                     self.encoder,
                     self._ema_encoder,
@@ -349,7 +352,7 @@ class WorldModel(nj.Module):
 
     def train(self, data, state):
         modules = [self.rssm, *self.heads.values()]
-        if self.config.encoder.cnn != "dino":
+        if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
             modules += [self.encoder]
         if self.config.aug.swav:
             modules += [self._obs_proj]
@@ -358,7 +361,7 @@ class WorldModel(nj.Module):
         )
         metrics.update(mets)
         if self.config.aug.swav:
-            if self.config.encoder.cnn != "dino":
+            if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
                 self._encoder_updater()
             self._proj_updater()
         return state, outs, metrics

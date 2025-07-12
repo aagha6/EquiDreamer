@@ -685,8 +685,10 @@ class MultiEncoder(nj.Module):
         mlp_kw = {**kw, "symlog_inputs": symlog_inputs, "name": "mlp"}
         if cnn == "resnet":
             self._cnn = ImageEncoderResnet(cnn_depth, cnn_blocks, resize, **cnn_kw)
-        if cnn == "dino":
-            self._cnn = ImageEncoderDINO(name="cnn")
+        if cnn == "pretrained":
+            self._cnn = PretrainedImageEncoder(name="cnn")
+        if cnn == "frame_averaging":
+            self._cnn = FrameAveragingImageEncoder(name="cnn", gspace=grp.grp_act)
         elif cnn == "equiv":
             self._cnn = EquivImageEncoder(cnn_depth, grp=grp, key=key, **cnn_kw)
         if self.mlp_shapes:
@@ -815,7 +817,7 @@ class MultiDecoder(nj.Module):
         raise NotImplementedError(self._image_dist)
 
 
-class ImageEncoderDINO(nj.Module):
+class PretrainedImageEncoder(nj.Module):
 
     def __init__(self):
         self._model = FlaxResNetModel.from_pretrained("microsoft/resnet-26")
@@ -823,6 +825,48 @@ class ImageEncoderDINO(nj.Module):
     def __call__(self, x):
         outputs = self._model(x)
         return outputs.pooler_output
+
+
+class FrameAveragingImageEncoder(PretrainedImageEncoder):
+
+    def __init__(self, gspace):
+        super().__init__()
+        self._gspace = gspace
+        self._basespace_transforms = self.precompute()
+
+    def precompute(self):
+        # Precalculate inverse of basespace transforms
+        if self._gspace.fibergroup.name == "C2":
+            basespace_transforms = [
+                lambda x: x,  # inverse of (0)
+                functools.partial(jnp.flip, axis=(-1,)),  # inverse of (1)
+            ]
+        elif self._gspace.fibergroup.name == "D2":
+            basespace_transforms = [
+                lambda x: x,  # inverse of (0, 0)
+                functools.partial(jnp.rot90, k=2, axis=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.flip, axis=(-1,)),  # inverse of (1, 0)
+                functools.partial(jnp.flip, axis=(-2,)),  # inverse of (1, 1)
+            ]
+        else:
+            raise NotImplementedError("only implemented for groups C2,D2")
+
+        return basespace_transforms
+
+    def apply_transformations(self, x):
+        ginv_x = []
+        for bs_trans in self._basespace_transforms:
+            # Need to use g_inverse
+            val = bs_trans(x)
+            ginv_x.append(val)
+        return ginv_x
+
+    def __call__(self, input):
+        outputs = []
+        ginv_x = self.apply_transformations(input)
+        for x in ginv_x:
+            outputs.append(self._model(x).pooler_output[:, :, 0, 0])
+        return jnp.stack(outputs, -1).reshape((x.shape[0], -1))
 
 
 class ImageEncoderResnet(nj.Module):
