@@ -820,11 +820,14 @@ class MultiDecoder(nj.Module):
 class PretrainedImageEncoder(nj.Module):
 
     def __init__(self):
-        self._model = FlaxResNetModel.from_pretrained("microsoft/resnet-26")
+        self._model = FlaxResNetModel.from_pretrained(
+            "microsoft/resnet-26", dtype=jnp.float16
+        )
+        self._model.params = self._model.to_fp16(self._model.params)
 
     def __call__(self, x):
         outputs = self._model(x)
-        return outputs.pooler_output
+        return jaxutils.cast_to_compute(outputs.pooler_output)
 
 
 class FrameAveragingImageEncoder(PretrainedImageEncoder):
@@ -853,20 +856,13 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
 
         return basespace_transforms
 
-    def apply_transformations(self, x):
-        ginv_x = []
-        for bs_trans in self._basespace_transforms:
-            # Need to use g_inverse
-            val = bs_trans(x)
-            ginv_x.append(val)
-        return ginv_x
-
     def __call__(self, input):
         outputs = []
-        ginv_x = self.apply_transformations(input)
-        for x in ginv_x:
-            outputs.append(self._model(x).pooler_output[:, :, 0, 0])
-        return jnp.stack(outputs, -1).reshape((x.shape[0], -1))
+        for bs_trans in self._basespace_transforms:
+            ginv_x = bs_trans(input)
+            outputs.append(self._model(ginv_x).pooler_output[:, :, 0, 0])
+        outputs = jnp.stack(outputs, -1).reshape((input.shape[0], -1))
+        return jaxutils.cast_to_compute(outputs)
 
 
 class ImageEncoderResnet(nj.Module):
