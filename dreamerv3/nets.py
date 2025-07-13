@@ -60,7 +60,7 @@ class RSSM(nj.Module):
         self._temperature = 0.1
         self._sinkhorn_eps = 0.05
         self._sinkhorn_iters = 3
-        self._inputs = Input(["stoch", "deter"], dims="deter")
+        self._inputs = Input(["deter", "stoch"], dims="deter")
         self._cup_catch = cup_catch
 
         self._equiv = equiv
@@ -130,13 +130,13 @@ class RSSM(nj.Module):
             if self._classes:
                 self._field_type_feat_proj = nn.FieldType(
                     gspace,
-                    self._stoch * self._classes * [gspace.trivial_repr]
-                    + deter * [gspace.regular_repr],
+                    deter * [gspace.regular_repr]
+                    + self._stoch * self._classes * [gspace.trivial_repr],
                 )
             else:
                 self._field_type_feat_proj = nn.FieldType(
                     gspace,
-                    self._stoch * [gspace.trivial_repr] + deter * [gspace.regular_repr],
+                    deter * [gspace.regular_repr] + self._stoch * [gspace.trivial_repr],
                 )
             self._field_type_proto = nn.FieldType(
                 gspace, self._proto * [gspace.regular_repr]
