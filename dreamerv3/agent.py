@@ -577,36 +577,8 @@ class VFunction(nj.Module):
     def __init__(self, rewfn, config, grp):
         self.rewfn = rewfn
         self.config = config
-        if config.rssm.equiv:
-            self.net = nets.InvMLP(
-                (),
-                deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
-                **self.config.critic,
-                grp=grp,
-                dims="deter",
-                name="net",
-            )
-            self.slow = nets.InvMLP(
-                (),
-                deter=config.rssm["deter"],
-                stoch=(
-                    config.rssm["stoch"] * config.rssm["classes"]
-                    if config.rssm["classes"]
-                    else config.rssm["stoch"]
-                ),
-                **self.config.critic,
-                grp=grp,
-                dims="deter",
-                name="slow",
-            )
-        else:
-            self.net = nets.MLP((), name="net", dims="deter", **self.config.critic)
-            self.slow = nets.MLP((), name="slow", dims="deter", **self.config.critic)
+        self.net = nets.MLP((), name="net", dims="deter", **self.config.critic)
+        self.slow = nets.MLP((), name="slow", dims="deter", **self.config.critic)
         self.updater = jaxutils.SlowUpdater(
             self.net,
             self.slow,
