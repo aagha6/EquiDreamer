@@ -780,9 +780,24 @@ class MultiDecoder(nj.Module):
             else:
                 raise NotImplementedError(cnn)
         if self.mlp_shapes:
-            self._mlp = MLP(
-                self.mlp_shapes, mlp_layers, mlp_units, **mlp_kw, name="mlp"
-            )
+            if grp is not None:
+                assert deter is not None and stoch is not None
+                self._mlp = EquivMLP(
+                    self.mlp_shapes,
+                    deter=deter,
+                    stoch=stoch,
+                    key=key,
+                    **mlp_kw,
+                    layers=mlp_layers,
+                    units=mlp_units,
+                    grp=grp,
+                    invariant=False,
+                    name="mlp",
+                )
+            else:
+                self._mlp = MLP(
+                    self.mlp_shapes, mlp_layers, mlp_units, **mlp_kw, name="mlp"
+                )
         self._inputs = Input(inputs, dims="deter")
         self._image_dist = image_dist
 
@@ -1235,7 +1250,7 @@ class MLP(nj.Module):
         self._dense = {
             k: v for k, v in kw.items() if k not in distkeys and k != "equiv"
         }
-        self._dist = {k: v for k, v in kw.items() if k in distkeys and k != "equiv"}
+        self._dist = {k: v for k, v in kw.items() if k in distkeys}
 
     def __call__(self, inputs, invariant=False):
         if invariant:
@@ -1339,7 +1354,7 @@ class EquivMLP(MLP):
             r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
-        keys = jax.random.split(key, 4)
+        keys = jax.random.split(key, 6)
         self.escnn1 = econv_module(
             in_type=self.feat_type_in,
             out_type=self.feat_type_hidden,
@@ -1361,48 +1376,84 @@ class EquivMLP(MLP):
                 self.feat_type_hidden, name="group_pooling"
             )
         else:
-            assert isinstance(shape, tuple)
             gspace = grp.grp_act
-            if gspace.fibergroup.name == "C2":
-                if cup_catch:
-                    self._field_out_type = nn.FieldType(
-                        gspace, [gspace.regular_repr] + [gspace.trivial_repr]
-                    )
-                else:
+            if self._dist["dist"] == "equiv_normal":
+                if gspace.fibergroup.name == "C2":
+                    if cup_catch:
+                        self._field_out_type = nn.FieldType(
+                            gspace, [gspace.regular_repr] + [gspace.trivial_repr]
+                        )
+                    else:
+                        self._field_out_type = nn.FieldType(
+                            gspace,
+                            shape[0] * [gspace.regular_repr],
+                        )
+                elif gspace.fibergroup.name == "D2":
+                    # Reacher
                     self._field_out_type = nn.FieldType(
                         gspace,
-                        shape[0] * [gspace.regular_repr],
+                        shape[0]
+                        * [gspace.quotient_repr((None, gspace.rotations_order))],
                     )
-            elif gspace.fibergroup.name == "D2":
-                # Reacher
+                else:
+                    raise NotImplementedError("only implemented for groups C2,D2")
+                act_dim = None
+                if cup_catch:
+                    act_dim = 2
+                else:
+                    act_dim = shape[0]
+                self._field_std_type = nn.FieldType(
+                    gspace, act_dim * [r2_act.trivial_repr]
+                )
+                self._init_equiv_actor = nn.R2Conv(
+                    in_type=self.feat_type_hidden,
+                    out_type=self._field_out_type,
+                    kernel_size=1,
+                    key=keys[2],
+                )
+                self._init_equiv_std = nn.R2Conv(
+                    in_type=self.feat_type_hidden,
+                    out_type=self._field_std_type,
+                    kernel_size=1,
+                    key=keys[3],
+                )
+                self._cup_catch = cup_catch
+            elif self._dist["dist"] == "mse":
+                self.escnn3 = econv_module(
+                    in_type=self.feat_type_hidden,
+                    out_type=self.feat_type_hidden,
+                    kernel_size=1,
+                    key=keys[2],
+                    name="s3conv",
+                )
+                self.escnn4 = econv_module(
+                    in_type=self.feat_type_hidden,
+                    out_type=self.feat_type_hidden,
+                    kernel_size=1,
+                    key=keys[3],
+                    name="s4conv",
+                )
+                self.escnn5 = econv_module(
+                    in_type=self.feat_type_hidden,
+                    out_type=self.feat_type_hidden,
+                    kernel_size=1,
+                    key=keys[4],
+                    name="s5conv",
+                )
                 self._field_out_type = nn.FieldType(
-                    gspace,
-                    shape[0] * [gspace.quotient_repr((None, gspace.rotations_order))],
+                    r2_act, 2048 * [r2_act.regular_repr]
+                )
+                self._init_equiv_linear = nn.R2Conv(
+                    in_type=self.feat_type_hidden,
+                    out_type=self._field_out_type,
+                    kernel_size=1,
+                    key=keys[5],
                 )
             else:
-                raise NotImplementedError("only implemented for groups C2,D2")
-            act_dim = None
-            if cup_catch:
-                act_dim = 2
-            else:
-                act_dim = shape[0]
-            self._field_std_type = nn.FieldType(gspace, act_dim * [r2_act.trivial_repr])
-            self._init_equiv_actor = nn.R2Conv(
-                in_type=self.feat_type_hidden,
-                out_type=self._field_out_type,
-                kernel_size=1,
-                key=keys[2],
-            )
-            self._init_equiv_std = nn.R2Conv(
-                in_type=self.feat_type_hidden,
-                out_type=self._field_std_type,
-                kernel_size=1,
-                key=keys[3],
-            )
+                raise ValueError(f"Unknown distribution {self._dist} for equiv MLP")
             self.group_pooling = None
         self.invariant = invariant
         self.equiv_relu = nn.ReLU(self.feat_type_hidden)
-        self._cup_catch = cup_catch
 
     def __call__(self, inputs):
         feat = self._inputs(inputs)
@@ -1421,7 +1472,15 @@ class EquivMLP(MLP):
         if self.invariant:
             x = self.group_pooling(x).tensor.mean(-1).mean(-1)
         else:
-            x = x.tensor.mean(-1).mean(-1)
+            if self._dist["dist"] == "equiv_normal":
+                x = x.tensor.mean(-1).mean(-1)
+            elif self._dist["dist"] == "mse":
+                x = self.escnn3(x)
+                x = self.equiv_relu(x)
+                x = self.escnn4(x)
+                x = self.equiv_relu(x)
+                x = self.escnn5(x)
+                x = self.equiv_relu(x).tensor.mean(-1).mean(-1)
 
         x = x.reshape(feat.shape[:-1] + (x.shape[-1],))
         if self._shape is None:
@@ -1442,6 +1501,10 @@ class EquivMLP(MLP):
             self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
+        if self._dist["dist"] == "mse":
+            self._dist["in_type"] = self.feat_type_hidden
+            self._dist["out_type"] = self._field_out_type
+            self._dist["init_equiv_linear"] = self._init_equiv_linear
         return self.get(f"dist_{name}", Dist, shape, **self._dist)(x)
 
 
@@ -1462,6 +1525,7 @@ class Dist(nj.Module):
         std_type=None,
         init_equiv_actor=None,
         init_equiv_std=None,
+        init_equiv_linear=None,
         group_pooling=None,
         cup_catch=False,
     ):
@@ -1474,6 +1538,7 @@ class Dist(nj.Module):
         self._outscale = outscale
         self._outnorm = outnorm
         self._bins = bins
+        self._init_equiv_linear = None
         if dist == "equiv_normal":
             assert (
                 in_type is not None
@@ -1487,6 +1552,10 @@ class Dist(nj.Module):
             self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
             self._group_pooling = group_pooling
+        elif init_equiv_linear is not None:
+            self._field_in_type = in_type
+            self._field_out_type = out_type
+            self._init_equiv_linear = init_equiv_linear
 
     def __call__(self, inputs):
         dist = self.inner(inputs)
@@ -1529,6 +1598,19 @@ class Dist(nj.Module):
             )(inputs.reshape([-1, inputs.shape[-1]]))
             out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
             std = std.reshape(inputs.shape[:-1] + (std.shape[-1],)).astype(f32)
+        elif self._init_equiv_linear is not None:
+            out = self.get(
+                "out",
+                EquivLinear,
+                **{
+                    "net": self._init_equiv_linear,
+                    "in_type": self._field_in_type,
+                    "out_type": self._field_out_type,
+                    "norm": "none",
+                    "act": "none",
+                },
+            )(inputs.reshape([-1, inputs.shape[-1]]))
+            out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
         else:
             out = self.get("out", Linear, int(np.prod(shape)), **kw)(inputs)
             out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
@@ -1542,7 +1624,7 @@ class Dist(nj.Module):
                 out, len(self._shape), -20, 20, jaxutils.symlog, jaxutils.symexp
             )
         if self._dist == "mse":
-            return jaxutils.MSEDist(out, len(self._shape), "sum")
+            return jaxutils.MSEDist(out, len(self._shape), "mean")
         if self._dist == "normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
