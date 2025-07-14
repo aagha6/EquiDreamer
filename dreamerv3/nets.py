@@ -1293,8 +1293,6 @@ class EquivMLP(MLP):
             **kw,
         )
         r2_act = grp.grp_act
-        factor = r2_act.regular_repr.size // grp.scaler
-        units = units // factor
         self.feat_type_in = nn.FieldType(
             r2_act, (deter // factor + stoch // factor) * [r2_act.regular_repr]
         )
