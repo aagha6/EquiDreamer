@@ -3,6 +3,7 @@ import os
 
 import embodied
 import numpy as np
+from transformers import AutoImageProcessor
 
 
 class DMC(embodied.Env):
@@ -44,12 +45,16 @@ class DMC(embodied.Env):
         self._render = render
         self._size = size
         self._camera = camera
+        self._image_processor = AutoImageProcessor.from_pretrained(
+            "microsoft/resnet-26"
+        )
 
     @functools.cached_property
     def obs_space(self):
         spaces = self._env.obs_space.copy()
         if self._render:
             spaces["image"] = embodied.Space(np.uint8, self._size + (3,))
+            spaces["procimage"] = embodied.Space(np.uint8, (3, 224, 224))
         return spaces
 
     @functools.cached_property
@@ -63,6 +68,8 @@ class DMC(embodied.Env):
         obs = self._env.step(action)
         if self._render:
             obs["image"] = self.render()
+            img = self._image_processor(images=obs["image"], return_tensors="np")
+            obs["procimage"] = img["pixel_values"][0]
         return obs
 
     def render(self):

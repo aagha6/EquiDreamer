@@ -62,6 +62,8 @@ class Agent(nj.Module):
             elif "reacher" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
         wm_key, beh_key = jax.random.split(key, 2)
+        if self.config.decoder.mlp_keys == "embed" and self.config.aug.swav:
+            raise ValueError("decoding embedding and swav")
         self.wm = WorldModel(
             obs_space,
             act_space,
@@ -99,7 +101,7 @@ class Agent(nj.Module):
 
     def policy(self, obs, state, mode="train"):
         self.config.jax.jit and print("Tracing policy function.")
-        obs = self.preprocess(obs, aug=False)
+        obs = self.preprocess(obs, swav=False)
         (prev_latent, prev_action), task_state, expl_state = state
         embed = self.wm.encoder(obs)
         latent, _ = self.wm.rssm.obs_step(
@@ -126,7 +128,7 @@ class Agent(nj.Module):
     def train(self, data, state):
         self.config.jax.jit and print("Tracing train function.")
         metrics = {}
-        data = self.preprocess(data, aug=self.config.aug.swav)
+        data = self.preprocess(data, swav=self.config.aug.swav)
         if self.config.aug.swav:
             prev_latent, prev_action = state
             prev_latent = {
@@ -163,7 +165,7 @@ class Agent(nj.Module):
             report.update({f"expl_{k}": v for k, v in mets.items()})
         return report
 
-    def preprocess(self, obs, aug=False):
+    def preprocess(self, obs, swav=False):
         obs = obs.copy()
         for key, value in obs.items():
             if key.startswith("log_") or key in ("key",):
@@ -175,7 +177,7 @@ class Agent(nj.Module):
             obs[key] = value
         obs["cont"] = 1.0 - obs["is_terminal"].astype(jnp.float32)
         # data augmentation
-        if aug:
+        if swav:
             obs = {k: jnp.concat([v, v], axis=0) for k, v in obs.items()}
             obs["image"] = jaxutils.random_translate(
                 obs["image"], self.config.aug.max_delta
@@ -190,6 +192,7 @@ class WorldModel(nj.Module):
         self.act_space = act_space["action"]
         self.config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
+        shapes["embed"] = (2048,)
         shapes = {k: v for k, v in shapes.items() if not k.startswith("log_")}
         (
             rssm_key,
@@ -207,7 +210,10 @@ class WorldModel(nj.Module):
 
         embed_size = None
         if config.rssm.equiv:
-            embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
+            if self.config.encoder.cnn == "frame_averaging":
+                embed_size = 2048
+            else:
+                embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
         num_prototypes = config.batch_size * config.batch_length
         self.rssm = nets.RSSM(
             rssm_key,
@@ -220,9 +226,12 @@ class WorldModel(nj.Module):
             num_prototypes=num_prototypes if config.aug.swav else None,
         )
         if config.aug.swav:
-            self._ema_encoder = nets.MultiEncoder(
-                shapes, ema_encoder_key, **config.encoder, grp=grp, name="slow_enc"
-            )
+            if self.config.encoder.cnn in ["pretrained", "frame_averaging"]:
+                self._ema_encoder = self.encoder
+            else:
+                self._ema_encoder = nets.MultiEncoder(
+                    shapes, ema_encoder_key, **config.encoder, grp=grp, name="slow_enc"
+                )
             if config.rssm.equiv:
                 gspace = grp.grp_act
                 field_type_proj_in = nn.FieldType(
@@ -266,12 +275,13 @@ class WorldModel(nj.Module):
                     units=config.rssm.proto, name="ema_proj"
                 )
 
-            self._encoder_updater = jaxutils.SlowUpdater(
-                self.encoder,
-                self._ema_encoder,
-                self.config.slow_critic_fraction,
-                self.config.slow_critic_update,
-            )
+            if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
+                self._encoder_updater = jaxutils.SlowUpdater(
+                    self.encoder,
+                    self._ema_encoder,
+                    self.config.slow_critic_fraction,
+                    self.config.slow_critic_update,
+                )
             self._proj_updater = jaxutils.SlowUpdater(
                 self._obs_proj,
                 self._ema_obs_proj,
@@ -341,7 +351,9 @@ class WorldModel(nj.Module):
         return prev_latent, prev_action
 
     def train(self, data, state):
-        modules = [self.encoder, self.rssm, *self.heads.values()]
+        modules = [self.rssm, *self.heads.values()]
+        if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
+            modules += [self.encoder]
         if self.config.aug.swav:
             modules += [self._obs_proj]
         mets, (state, outs, metrics) = self.opt(
@@ -349,7 +361,8 @@ class WorldModel(nj.Module):
         )
         metrics.update(mets)
         if self.config.aug.swav:
-            self._encoder_updater()
+            if self.config.encoder.cnn not in ["pretrained", "frame_averaging"]:
+                self._encoder_updater()
             self._proj_updater()
         return state, outs, metrics
 
@@ -364,6 +377,8 @@ class WorldModel(nj.Module):
 
     def loss(self, data, state):
         embed = self.encoder(data)
+        if self.config.decoder.mlp_keys == "embed":
+            data["embed"] = embed
         prev_latent, prev_action = state
         prev_actions = jnp.concatenate(
             [prev_action[:, None], data["action"][:, :-1]], 1
