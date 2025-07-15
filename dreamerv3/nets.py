@@ -1400,14 +1400,6 @@ class EquivMLP(MLP):
                     )
                 else:
                     raise NotImplementedError("only implemented for groups C2,D2")
-                act_dim = None
-                if cup_catch:
-                    act_dim = 2
-                else:
-                    act_dim = shape[0]
-                self._field_std_type = nn.FieldType(
-                    gspace, act_dim * [r2_act.trivial_repr]
-                )
                 self._init_equiv_actor = nn.R2Conv(
                     in_type=self.feat_type_hidden,
                     out_type=self._field_out_type,
@@ -1416,7 +1408,7 @@ class EquivMLP(MLP):
                 )
                 self._init_equiv_std = nn.R2Conv(
                     in_type=self.feat_type_hidden,
-                    out_type=self._field_std_type,
+                    out_type=self._field_out_type,
                     kernel_size=1,
                     key=keys[3],
                 )
@@ -1497,7 +1489,6 @@ class EquivMLP(MLP):
         if self._dist["dist"] == "equiv_normal":
             self._dist["in_type"] = self.feat_type_hidden
             self._dist["out_type"] = self._field_out_type
-            self._dist["std_type"] = self._field_std_type
             self._dist["init_equiv_actor"] = self._init_equiv_actor
             self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
@@ -1523,7 +1514,6 @@ class Dist(nj.Module):
         bins=255,
         in_type=None,
         out_type=None,
-        std_type=None,
         init_equiv_actor=None,
         init_equiv_std=None,
         init_equiv_linear=None,
@@ -1548,7 +1538,6 @@ class Dist(nj.Module):
             )
             self._field_in_type = in_type
             self._field_out_type = out_type
-            self._field_std_type = std_type
             self._init_equiv_actor = init_equiv_actor
             self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
@@ -1560,11 +1549,12 @@ class Dist(nj.Module):
 
     def __call__(self, inputs):
         dist = self.inner(inputs)
-        assert tuple(dist.batch_shape) == tuple(inputs.shape[:-1]), (
-            dist.batch_shape,
-            dist.event_shape,
-            inputs.shape,
-        )
+        if not isinstance(dist, jaxutils.EquivNormalDist):
+            assert tuple(dist.batch_shape) == tuple(inputs.shape[:-1]), (
+                dist.batch_shape,
+                dist.event_shape,
+                inputs.shape,
+            )
         return dist
 
     def inner(self, inputs):
@@ -1592,7 +1582,7 @@ class Dist(nj.Module):
                 **{
                     "net": self._init_equiv_std,
                     "in_type": self._field_in_type,
-                    "out_type": self._field_std_type,
+                    "out_type": self._field_out_type,
                     "norm": "none",
                     "act": "none",
                 },
@@ -1637,12 +1627,9 @@ class Dist(nj.Module):
         if self._dist == "equiv_normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-            if self._cup_catch:
-                out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
-            else:
-                out = out.reshape(out.shape[:-1] + (-1, 2))
-                out = out @ jnp.array([1, -1])
-            dist = tfd.Normal(jnp.tanh(out), std)
+            dist = jaxutils.EquivNormalDist(
+                jnp.tanh(out), std, cup_catch=self._cup_catch
+            )
             dist = tfd.Independent(dist, len(self._shape))
             dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()
             dist.maxent = np.prod(self._shape) * tfd.Normal(0.0, hi).entropy()

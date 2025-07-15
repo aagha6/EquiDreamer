@@ -96,6 +96,30 @@ class OneHotDist(tfd.OneHotCategorical):
         return tensor
 
 
+class EquivNormalDist(tfd.Normal):
+
+    def __init__(self, loc, scale, dtype=jnp.float32, cup_catch=False):
+        super().__init__(
+            loc,
+            scale,
+            dtype,
+        )
+        self._cup_catch = cup_catch
+
+    @classmethod
+    def _parameter_properties(self, dtype, num_classes=None):
+        return super()._parameter_properties(dtype)
+
+    def sample(self, sample_shape=(), seed=None):
+        sample = super().sample(sample_shape, seed)
+        if self._cup_catch:
+            sample = sample @ jnp.array([[1, 0], [-1, 0], [0, 1]])
+        else:
+            sample = sample.reshape(sample.shape[:-1] + (-1, 2))
+            sample = sample @ jnp.array([1, -1])
+        return sample
+
+
 class MSEDist:
 
     def __init__(self, mode, dims, agg="sum"):
