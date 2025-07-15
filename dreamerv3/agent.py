@@ -562,10 +562,11 @@ class ImagActorCritic(nj.Module):
             metrics[f"{key}_return_rate"] = (jnp.abs(ret) >= 0.5).mean()
         adv = jnp.stack(advs).sum(0)
         policy = self.actor(sg(traj))
-        logpi = policy.log_prob(sg(traj["action"]))[:-1]
+        logpi = None
         if self.grad == "backprop":
             loss = -adv
         elif self.grad == "reinforce":
+            logpi = policy.log_prob(sg(traj["action"]))[:-1]
             loss = -logpi * sg(adv)
         ent = policy.entropy()[:-1]
         loss -= self.config.actent * ent
@@ -584,7 +585,8 @@ class ImagActorCritic(nj.Module):
         metrics.update(jaxutils.tensorstats(act, "action"))
         metrics.update(jaxutils.tensorstats(rand, "policy_randomness"))
         metrics.update(jaxutils.tensorstats(ent, "policy_entropy"))
-        metrics.update(jaxutils.tensorstats(logpi, "policy_logprob"))
+        if logpi is not None:
+            metrics.update(jaxutils.tensorstats(logpi, "policy_logprob"))
         metrics.update(jaxutils.tensorstats(adv, "adv"))
         metrics["imag_weight_dist"] = jaxutils.subsample(traj["weight"])
         return metrics
