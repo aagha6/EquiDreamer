@@ -1409,25 +1409,15 @@ class EquivMLP(MLP):
                     )
                 else:
                     raise NotImplementedError("only implemented for groups C2,D2")
-                act_dim = None
                 if cup_catch:
-                    act_dim = 2
+                    self._shape = (2,)
                 else:
-                    act_dim = shape[0]
-                self._field_std_type = nn.FieldType(
-                    gspace, act_dim * [r2_act.trivial_repr]
-                )
+                    self._shape = shape
                 self._init_equiv_actor = nn.R2Conv(
                     in_type=self.feat_type_hidden,
                     out_type=self._field_out_type,
                     kernel_size=1,
                     key=keys[2],
-                )
-                self._init_equiv_std = nn.R2Conv(
-                    in_type=self.feat_type_hidden,
-                    out_type=self._field_std_type,
-                    kernel_size=1,
-                    key=keys[3],
                 )
                 self._cup_catch = cup_catch
             elif self._dist["dist"] == "mse":
@@ -1508,9 +1498,7 @@ class EquivMLP(MLP):
         if self._dist["dist"] == "equiv_normal":
             self._dist["in_type"] = self.feat_type_hidden
             self._dist["out_type"] = self._field_out_type
-            self._dist["std_type"] = self._field_std_type
             self._dist["init_equiv_actor"] = self._init_equiv_actor
-            self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
         if self._dist["dist"] == "mse":
@@ -1534,9 +1522,7 @@ class Dist(nj.Module):
         bins=255,
         in_type=None,
         out_type=None,
-        std_type=None,
         init_equiv_actor=None,
-        init_equiv_std=None,
         init_equiv_linear=None,
         group_pooling=None,
         cup_catch=False,
@@ -1559,9 +1545,7 @@ class Dist(nj.Module):
             )
             self._field_in_type = in_type
             self._field_out_type = out_type
-            self._field_std_type = std_type
             self._init_equiv_actor = init_equiv_actor
-            self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
             self._group_pooling = group_pooling
         elif init_equiv_linear is not None:
@@ -1597,19 +1581,7 @@ class Dist(nj.Module):
                     "act": "none",
                 },
             )(inputs.reshape([-1, inputs.shape[-1]]))
-            std = self.get(
-                "std",
-                EquivLinear,
-                **{
-                    "net": self._init_equiv_std,
-                    "in_type": self._field_in_type,
-                    "out_type": self._field_std_type,
-                    "norm": "none",
-                    "act": "none",
-                },
-            )(inputs.reshape([-1, inputs.shape[-1]]))
             out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
-            std = std.reshape(inputs.shape[:-1] + (std.shape[-1],)).astype(f32)
         elif self._init_equiv_linear is not None:
             out = self.get(
                 "out",
@@ -1626,7 +1598,7 @@ class Dist(nj.Module):
         else:
             out = self.get("out", Linear, int(np.prod(shape)), **kw)(inputs)
             out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
-        if self._dist in ("normal", "trunc_normal"):
+        if self._dist in ("normal", "trunc_normal", "equiv_normal"):
             std = self.get("std", Linear, int(np.prod(self._shape)), **kw)(inputs)
             std = std.reshape(inputs.shape[:-1] + self._shape).astype(f32)
         if self._dist == "symlog_mse":
