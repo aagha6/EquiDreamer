@@ -563,7 +563,10 @@ class ImagActorCritic(nj.Module):
         adv = jnp.stack(advs).sum(0)
         policy = self.actor(sg(traj))
         logpi = policy.log_prob(sg(traj["action"]))[:-1]
-        loss = {"backprop": -adv, "reinforce": -logpi * sg(adv)}[self.grad]
+        if self.grad == "backprop":
+            loss = -adv
+        elif self.grad == "reinforce":
+            loss = -logpi * sg(adv)
         ent = policy.entropy()[:-1]
         loss -= self.config.actent * ent
         loss *= sg(traj["weight"])[:-1]
