@@ -46,7 +46,7 @@ class DMC(embodied.Env):
         self._size = size
         self._camera = camera
         self._image_processor = AutoImageProcessor.from_pretrained(
-            "microsoft/resnet-26"
+            "facebook/dinov2-small"
         )
 
     @functools.cached_property

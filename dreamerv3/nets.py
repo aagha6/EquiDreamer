@@ -7,7 +7,7 @@ import equinox as eqx
 import escnn_jax.nn as nn
 import numpy as np
 from tensorflow_probability.substrates import jax as tfp
-from transformers import FlaxResNetModel
+from transformers import FlaxDinov2Model
 
 f32 = jnp.float32
 tfd = tfp.distributions
@@ -845,8 +845,8 @@ class MultiDecoder(nj.Module):
 class PretrainedImageEncoder(nj.Module):
 
     def __init__(self):
-        self._model = FlaxResNetModel.from_pretrained(
-            "microsoft/resnet-26", dtype=jnp.float16
+        self._model = FlaxDinov2Model.from_pretrained(
+            "facebook/dinov2-small", dtype=jnp.float16
         )
         self._model.params = self._model.to_fp16(self._model.params)
 
@@ -885,7 +885,7 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
         outputs = []
         for bs_trans in self._basespace_transforms:
             ginv_x = bs_trans(input)
-            outputs.append(self._model(ginv_x).pooler_output[:, :, 0, 0])
+            outputs.append(self._model(ginv_x).pooler_output)
         outputs = jnp.stack(outputs, -1).reshape((input.shape[0], -1))
         return jaxutils.cast_to_compute(outputs)
 
@@ -1452,9 +1452,7 @@ class EquivMLP(MLP):
                     key=keys[4],
                     name="s5conv",
                 )
-                self._field_out_type = nn.FieldType(
-                    r2_act, 2048 * [r2_act.regular_repr]
-                )
+                self._field_out_type = nn.FieldType(r2_act, 384 * [r2_act.regular_repr])
                 self._init_equiv_linear = nn.R2Conv(
                     in_type=self.feat_type_hidden,
                     out_type=self._field_out_type,

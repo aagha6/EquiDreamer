@@ -192,7 +192,7 @@ class WorldModel(nj.Module):
         self.act_space = act_space["action"]
         self.config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.items()}
-        shapes["embed"] = (2048,)
+        shapes["embed"] = (384,)
         shapes = {k: v for k, v in shapes.items() if not k.startswith("log_")}
         (
             rssm_key,
@@ -211,7 +211,7 @@ class WorldModel(nj.Module):
         embed_size = None
         if config.rssm.equiv:
             if self.config.encoder.cnn == "frame_averaging":
-                embed_size = 2048
+                embed_size = 384
             else:
                 embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
         num_prototypes = config.batch_size * config.batch_length
