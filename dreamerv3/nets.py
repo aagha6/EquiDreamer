@@ -872,9 +872,9 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
         elif self._gspace.fibergroup.name == "D2":
             basespace_transforms = [
                 lambda x: x,  # inverse of (0, 0)
-                functools.partial(jnp.rot90, k=2, axis=(-2, -1)),  # inverse of (0, 1)
-                functools.partial(jnp.flip, axis=(-1,)),  # inverse of (1, 0)
-                functools.partial(jnp.flip, axis=(-2,)),  # inverse of (1, 1)
+                functools.partial(jnp.rot90, k=2, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.flip, axis=-1),  # inverse of (1, 0)
+                functools.partial(jnp.flip, axis=-2),  # inverse of (1, 1)
             ]
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
