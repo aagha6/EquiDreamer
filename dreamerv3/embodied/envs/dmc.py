@@ -54,7 +54,7 @@ class DMC(embodied.Env):
         spaces = self._env.obs_space.copy()
         if self._render:
             spaces["image"] = embodied.Space(np.uint8, self._size + (3,))
-            spaces["procimage"] = embodied.Space(np.uint8, (3, 224, 224))
+            spaces["procimage"] = embodied.Space(np.uint8, (3, 64, 64))
         return spaces
 
     @functools.cached_property
