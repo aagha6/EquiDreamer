@@ -246,5 +246,5 @@ class JAXAgent(embodied.Agent):
         data = {k: np.zeros(v.shape, v.dtype) for k, v in spaces}
         for dim in reversed(batch_dims):
             data = {k: np.repeat(v[None], dim, axis=0) for k, v in data.items()}
-        data["procimage"] = np.zeros(batch_dims + (3, 64, 64))
+        data["procimage"] = np.zeros(batch_dims + (3, 224, 224))
         return data
