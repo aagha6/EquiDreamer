@@ -1297,6 +1297,7 @@ class InvMLP(MLP):
         deter,
         stoch,
         grp,
+        key,
         inputs=["tensor"],
         dims=None,
         symlog_inputs=False,
@@ -1318,7 +1319,16 @@ class InvMLP(MLP):
         self.feat_type_in = nn.FieldType(
             r2_act, (deter // factor + stoch // factor) * [r2_act.regular_repr]
         )
-        self.group_pooling = pooling_module(self.feat_type_in, name="group_pooling")
+        self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
+        self.escnn1 = econv_module(
+            in_type=self.feat_type_in,
+            out_type=self.feat_type_hidden,
+            kernel_size=1,
+            key=key,
+            name="s1conv",
+        )
+        self.equiv_relu = nn.ReLU(self.feat_type_hidden)
+        self.group_pooling = pooling_module(self.feat_type_hidden, name="group_pooling")
 
     def __call__(self, inputs):
         feat = self._inputs(inputs)
@@ -1326,6 +1336,8 @@ class InvMLP(MLP):
         x = x[:, :, jnp.newaxis, jnp.newaxis]
         assert len(x.shape) == 4
         x = nn.GeometricTensor(x, self.feat_type_in)
+        x = self.escnn1(x)
+        x = self.equiv_relu(x)
         x = self.group_pooling(x).tensor.mean(-1).mean(-1)
         return super().__call__(
             x.reshape(feat.shape[:-1] + (x.shape[-1],)), invariant=True
