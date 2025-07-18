@@ -71,13 +71,12 @@ class RSSM(nj.Module):
             assert embed_size is not None
             self.embed_size = embed_size
             self._grp = grp
-            self._factor = self._grp.grp_act.regular_repr.size // self._grp.scaler
             self.init_equiv_nets(key)
 
     def init_equiv_nets(self, key):
-        units = self._kw["units"] // self._grp.scaler
-        stoch = self._stoch // self._grp.scaler
-        deter = self._deter // self._grp.scaler
+        units = int(self._kw["units"] // (self._grp.scaler**0.5))
+        stoch = int(self._stoch // (self._grp.scaler**0.5))
+        deter = int(self._deter // (self._grp.scaler**0.5))
         gspace = self._grp.grp_act
         if self._classes:
             self._field_type_stoch = nn.FieldType(
@@ -198,8 +197,8 @@ class RSSM(nj.Module):
 
     def initial(self, bs):
         if self._equiv:
-            stoch = self._stoch * self._factor
-            deter = self._deter * self._factor
+            stoch = int(self._stoch // self._grp.scaler**0.5 * self._grp.scaler)
+            deter = int(self._deter // self._grp.scaler**0.5 * self._grp.scaler)
         else:
             stoch = self._stoch
             deter = self._deter
@@ -932,7 +931,7 @@ class EquivImageEncoder(nj.Module):
 
     def __init__(self, depth, grp, key, **kw):
         gspace = grp.grp_act
-        depth = depth // grp.scaler
+        depth = int(depth // (grp.scaler**0.5))
         self.feat_type_in = nn.FieldType(gspace, 3 * [gspace.trivial_repr])
         self.feat_type_out1 = nn.FieldType(gspace, depth * [gspace.regular_repr])
         depth *= 2
@@ -1305,7 +1304,9 @@ class InvMLP(MLP):
 
         r2_act = grp.grp_act
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act,
+            int(deter // (grp.scaler**0.5) + stoch // (grp.scaler**0.5))
+            * [r2_act.regular_repr],
         )
         self.group_pooling = pooling_module(self.feat_type_in, name="group_pooling")
 
@@ -1351,7 +1352,9 @@ class EquivMLP(MLP):
         )
         r2_act = grp.grp_act
         self.feat_type_in = nn.FieldType(
-            r2_act, (deter // grp.scaler + stoch // grp.scaler) * [r2_act.regular_repr]
+            r2_act,
+            int(deter // (grp.scaler**0.5) + stoch // (grp.scaler**0.5))
+            * [r2_act.regular_repr],
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
         keys = jax.random.split(key, 6)
