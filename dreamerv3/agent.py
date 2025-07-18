@@ -213,7 +213,9 @@ class WorldModel(nj.Module):
             if self.config.encoder.cnn == "frame_averaging":
                 embed_size = 2048
             else:
-                embed_size = config.encoder.cnn_depth * (2**4) * 6 // grp.scaler
+                embed_size = int(
+                    config.encoder.cnn_depth // (grp.scaler**0.5) * (2**4) * 6
+                )
         num_prototypes = config.batch_size * config.batch_length
         self.rssm = nets.RSSM(
             rssm_key,
