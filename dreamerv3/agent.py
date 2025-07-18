@@ -591,10 +591,11 @@ class ImagActorCritic(nj.Module):
 
 class VFunction(nj.Module):
 
-    def __init__(self, rewfn, config, grp):
+    def __init__(self, rewfn, config, grp, key):
         self.rewfn = rewfn
         self.config = config
         if config.rssm.equiv:
+            keys = jax.random.split(key, 2)
             self.net = nets.InvMLP(
                 (),
                 deter=config.rssm["deter"],
@@ -605,6 +606,7 @@ class VFunction(nj.Module):
                 ),
                 **self.config.critic,
                 grp=grp,
+                key=keys[0],
                 dims="deter",
                 name="net",
             )
@@ -618,6 +620,7 @@ class VFunction(nj.Module):
                 ),
                 **self.config.critic,
                 grp=grp,
+                key=keys[1],
                 dims="deter",
                 name="slow",
             )
