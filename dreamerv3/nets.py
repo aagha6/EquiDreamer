@@ -835,7 +835,7 @@ class PretrainedImageEncoder(nj.Module):
 
     def __init__(self):
         self._model = FlaxResNetModel.from_pretrained(
-            "microsoft/resnet-26", dtype=jnp.float16
+            "microsoft/resnet-18", dtype=jnp.float16
         )
         self._model.params = self._model.to_fp16(self._model.params)
 
@@ -1443,9 +1443,7 @@ class EquivMLP(MLP):
                     key=keys[4],
                     name="s5conv",
                 )
-                self._field_out_type = nn.FieldType(
-                    r2_act, 2048 * [r2_act.regular_repr]
-                )
+                self._field_out_type = nn.FieldType(r2_act, 512 * [r2_act.regular_repr])
                 self._init_equiv_linear = nn.R2Conv(
                     in_type=self.feat_type_hidden,
                     out_type=self._field_out_type,
