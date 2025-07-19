@@ -18,6 +18,35 @@ COMPUTE_DTYPE = jnp.float32
 transform = augmax.Chain(augmax.RandomCrop(64, 64))
 
 
+def cosine_distance(vec1, vec2):
+    """
+    Computes the cosine distance between two vectors.
+
+    Args:
+        vec1 (jnp.ndarray): First vector.
+        vec2 (jnp.ndarray): Second vector.
+
+    Returns:
+        float: Cosine distance between vec1 and vec2.
+    """
+    # Compute the dot product
+    dot_product = jnp.dot(vec1, vec2)
+
+    # Compute the magnitudes (L2 norms) of the vectors
+    norm_vec1 = jnp.linalg.norm(vec1)
+    norm_vec2 = jnp.linalg.norm(vec2)
+
+    # Compute the cosine similarity
+    cosine_similarity = dot_product / (
+        norm_vec1 * norm_vec2 + 1e-8
+    )  # Add epsilon to avoid division by zero
+
+    # Cosine distance is 1 - cosine similarity
+    cosine_distance = 1.0 - cosine_similarity
+
+    return cosine_distance
+
+
 def cast_to_compute(values):
     return tree_map(lambda x: x.astype(COMPUTE_DTYPE), values)
 
@@ -113,11 +142,18 @@ class MSEDist:
 
     def log_prob(self, value):
         assert self._mode.shape == value.shape, (self._mode.shape, value.shape)
-        distance = (self._mode - value) ** 2
         if self._agg == "mean":
+            distance = (self._mode - value) ** 2
             loss = distance.mean(self._dims)
         elif self._agg == "sum":
+            distance = (self._mode - value) ** 2
             loss = distance.sum(self._dims)
+        elif self._agg == "cosine":
+            loss = jax.vmap(cosine_distance)(
+                self._mode.reshape((-1,) + self.event_shape),
+                value.reshape((-1,) + self.event_shape),
+            )
+            loss = loss.reshape(self.batch_shape)
         else:
             raise NotImplementedError(self._agg)
         return -loss

@@ -1625,7 +1625,7 @@ class Dist(nj.Module):
                 out, len(self._shape), -20, 20, jaxutils.symlog, jaxutils.symexp
             )
         if self._dist == "mse":
-            return jaxutils.MSEDist(out, len(self._shape), "mean")
+            return jaxutils.MSEDist(out, len(self._shape), "cosine")
         if self._dist == "normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
