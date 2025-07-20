@@ -1306,7 +1306,7 @@ class InvMLP(MLP):
         r2_act = grp.grp_act
         self.feat_type_in = nn.FieldType(
             r2_act,
-            int(deter // (grp.scaler**0.5) + stoch // (grp.scaler**0.5))
+            int(deter // (grp.scaler**0.25) + stoch // (grp.scaler**0.25))
             * [r2_act.regular_repr],
         )
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
