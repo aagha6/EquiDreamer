@@ -1357,7 +1357,7 @@ class EquivMLP(MLP):
             * [r2_act.regular_repr],
         )
         if self._dist["dist"] == "mse":
-            units = int(units // (grp.scaler**0.5))
+            units = int(units // (grp.scaler**0.25))
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
         keys = jax.random.split(key, 6)
         self.escnn1 = econv_module(
