@@ -1370,7 +1370,7 @@ class EquivMLP(MLP):
             int(deter // (grp.scaler**0.5) + stoch // (grp.scaler**0.5))
             * [r2_act.regular_repr],
         )
-        units = int(units // (grp.scaler**0.2))
+        units = int(units // (grp.scaler**0.3))
         self.feat_type_hidden = nn.FieldType(r2_act, units * [r2_act.regular_repr])
         keys = jax.random.split(key, 6)
         self.escnn1 = econv_module(
