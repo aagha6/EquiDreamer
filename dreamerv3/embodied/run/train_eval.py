@@ -69,6 +69,7 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
     driver_eval.on_step(eval_replay.add)
     driver_eval.on_episode(lambda ep, worker: per_episode(ep, mode="eval"))
 
+    # TODO: need to fix this
     if train_env.obs_space["image"].shape[0] == 128:  ## manipulation env
         init_agent = embodied.ExpertAgent(
             p_range=train_env._envs[0].p_range,
