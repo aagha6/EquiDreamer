@@ -69,7 +69,7 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
     driver_eval.on_step(eval_replay.add)
     driver_eval.on_episode(lambda ep, worker: per_episode(ep, mode="eval"))
 
-    if train_env.obs_space["image"].shape[-1] == 2:  ## manipulation env
+    if train_env.obs_space["image"].shape[0] == 128:  ## manipulation env
         init_agent = embodied.ExpertAgent(
             p_range=train_env._envs[0].p_range,
             dx_range=train_env._envs[0].dx_range,
@@ -146,7 +146,7 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
             driver_eval.reset()
             driver_eval(policy_eval, episodes=max(len(eval_env), args.eval_eps))
         driver_train(policy_train, steps=100)
-        if should_save(step):
-            checkpoint.save()
+        """if should_save(step):
+            checkpoint.save()"""
     logger.write()
     logger.write()
