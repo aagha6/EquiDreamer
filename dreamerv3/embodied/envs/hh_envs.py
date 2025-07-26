@@ -104,7 +104,7 @@ class Manipulation(embodied.Env):
     @functools.cached_property
     def obs_space(self):
         spaces = {}
-        spaces["image"] = gym.spaces.Box(0, 255, self._size + (2,), dtype=np.uint8)
+        spaces["image"] = gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
         spaces = {k: self._convert(v) for k, v in spaces.items()}
         return {
             **spaces,
@@ -140,7 +140,7 @@ class Manipulation(embodied.Env):
         state_tile = np.tile(
             state.reshape(1, 1, 1), (depth_img.shape[0], depth_img.shape[1], 1)
         )
-        stacked = np.concatenate([depth_img, state_tile], -1)
+        stacked = np.concatenate([depth_img, depth_img, state_tile], -1)
         return stacked
 
     def decode_actions(self, unscaled_action):
