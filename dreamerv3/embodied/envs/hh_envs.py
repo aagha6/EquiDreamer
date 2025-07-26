@@ -4,6 +4,7 @@ import embodied
 import gym
 import numpy as np
 from helping_hands_rl_envs import env_factory
+from transformers import AutoImageProcessor
 
 
 def decode_actions(
@@ -92,6 +93,9 @@ class Manipulation(embodied.Env):
         self._act_key = act_key
         self._done = True
         self._info = None
+        self._image_processor = AutoImageProcessor.from_pretrained(
+            "microsoft/resnet-18"
+        )
 
     @property
     def env(self):
@@ -105,6 +109,7 @@ class Manipulation(embodied.Env):
     def obs_space(self):
         spaces = {}
         spaces["image"] = gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
+        spaces["procimage"] = embodied.Space(np.uint8, (3, 224, 224))
         spaces = {k: self._convert(v) for k, v in spaces.items()}
         return {
             **spaces,
@@ -141,7 +146,9 @@ class Manipulation(embodied.Env):
             state.reshape(1, 1, 1), (depth_img.shape[0], depth_img.shape[1], 1)
         )
         stacked = np.concatenate([depth_img, depth_img, state_tile], -1)
-        return stacked
+        img = self._image_processor(images=stacked, return_tensors="np")
+        procimage = img["pixel_values"][0]
+        return stacked, procimage
 
     def decode_actions(self, unscaled_action):
         unscaled_p, unscaled_dx, unscaled_dy, unscaled_dz, unscaled_dtheta = (
@@ -181,8 +188,8 @@ class Manipulation(embodied.Env):
         if action["reset"] or self._done:
             self._done = False
             state, _, depth_img = self._env.reset()
-            obs = self.process_obs(state=state, depth_img=depth_img)
-            return self._obs(obs, 0.0, is_first=True)
+            obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+            return self._obs(obs, procimage, 0.0, is_first=True)
         if self._act_dict:
             action = self._unflatten(action)
         else:
@@ -192,12 +199,15 @@ class Manipulation(embodied.Env):
         (state, _, depth_img), reward, self._done = self._env.step(
             scaled_action, auto_reset=False
         )
-        obs = self.process_obs(state=state, depth_img=depth_img)
-        return self._obs(obs, reward, is_last=bool(self._done), is_terminal=False)
+        obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+        return self._obs(
+            obs, procimage, reward, is_last=bool(self._done), is_terminal=False
+        )
 
-    def _obs(self, obs, reward, is_first=False, is_last=False, is_terminal=False):
-        if not self._obs_dict:
-            obs = {self._obs_key: obs}
+    def _obs(
+        self, obs, procimage, reward, is_first=False, is_last=False, is_terminal=False
+    ):
+        obs = {"image": obs, "procimage": procimage}
         obs = self._flatten(obs)
         obs = {k: np.asarray(v) for k, v in obs.items()}
         obs.update(
