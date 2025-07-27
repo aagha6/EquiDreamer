@@ -42,14 +42,18 @@ class Agent(nj.Module):
         grp = None
         cup_catch = False
         if config.rssm.equiv:
-            assert config.task in [
-                "dmc_cartpole_swingup",
-                "dmc_acrobot_swingup",
-                "dmc_reacher_easy",
-                "dmc_reacher_hard",
-                "dmc_cup_catch",
-                "dmc_pendulum_swingup",
-            ], "Only DMC Cartpole Swingup task supports equivariance"
+            assert (
+                config.task
+                in [
+                    "dmc_cartpole_swingup",
+                    "dmc_acrobot_swingup",
+                    "dmc_reacher_easy",
+                    "dmc_reacher_hard",
+                    "dmc_cup_catch",
+                    "dmc_pendulum_swingup",
+                ]
+                or "manipulation" in config.task
+            ), "Unsupported environment"
             if config.task in [
                 "dmc_cartpole_swingup",
                 "dmc_acrobot_swingup",
@@ -61,6 +65,8 @@ class Agent(nj.Module):
                     cup_catch = True
             elif "reacher" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
+            elif "manipulation" in config.task:
+                grp = jaxutils.GroupHelper(gspace=gspaces.rot2dOnR2, n_rotations=4)
         wm_key, beh_key = jax.random.split(key, 2)
         if self.config.decoder.mlp_keys == "embed" and self.config.aug.swav:
             raise ValueError("decoding embedding and swav")
@@ -497,7 +503,7 @@ class ImagActorCritic(nj.Module):
         self.config = config
         disc = act_space.discrete
         self.grad = config.actor_grad_disc if disc else config.actor_grad_cont
-        if config.rssm.equiv:
+        if config.actor_dist_cont == "equiv_normal":
             self.cup_catch = cup_catch
             self.actor = nets.EquivMLP(
                 name="actor",
@@ -513,7 +519,7 @@ class ImagActorCritic(nj.Module):
                 shape=act_space.shape,
                 **config.actor,
                 cup_catch=self.cup_catch,
-                dist=config.actor_dist_disc if disc else config.actor_dist_cont,
+                dist=config.actor_dist_cont,
             )
         else:
             self.actor = nets.MLP(

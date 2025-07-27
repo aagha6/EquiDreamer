@@ -110,6 +110,11 @@ class RSSM(nj.Module):
                 gspace,
                 self._act_dim * [gspace.quotient_repr((None, gspace.rotations_order))],
             )
+        elif gspace.fibergroup.name == "C4":
+            # bulletarm
+            self._field_type_act = nn.FieldType(
+                gspace, [gspace.irrep(1)] + (5 - 2) * [gspace.trivial_repr]
+            )
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
         self._field_type_img_in = self._field_type_stoch + self._field_type_act
@@ -314,10 +319,12 @@ class RSSM(nj.Module):
                 act = prev_action @ jnp.array(
                     [[1, -1, 0], [0, 0, 1]], dtype=jnp.float32
                 )
-            else:
+            elif self._grp.grp_act.fibergroup.name == "C2":
                 act = jnp.stack([prev_action, -prev_action], -1).reshape(
                     prev_action.shape[:-1] + (-1,)
                 )
+            elif self._grp.grp_act.fibergroup.name == "C4":
+                act = prev_action
 
             prev_stoch = nn.GeometricTensor(
                 prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch
@@ -864,6 +871,13 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
                 functools.partial(jnp.rot90, k=2, axes=(-2, -1)),  # inverse of (0, 1)
                 functools.partial(jnp.flip, axis=(-1,)),  # inverse of (1, 0)
                 functools.partial(jnp.flip, axis=(-2,)),  # inverse of (1, 1)
+            ]
+        elif self._gspace.fibergroup.name == "C4":
+            basespace_transforms = [
+                functools.partial(jnp.rot90, k=0, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=1, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=2, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=3, axes=(-2, -1)),  # inverse of (0, 1)s
             ]
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
@@ -1590,6 +1604,20 @@ class Dist(nj.Module):
         if self._dist.endswith("_disc"):
             shape = (*self._shape, self._bins)
         if self._dist == "equiv_normal":
+            """
+            def getOutFieldType(self):
+                return nn.FieldType(self.group, self.n_rho1 * [self.group.irrep(1)] + (self.action_dim*2-2) * [self.group.trivial_repr])
+
+            def getOutput(self, conv_out):
+                dxy = conv_out[:, 0:2]
+                inv_act = conv_out[:, 2:self.action_dim]
+                mean = torch.cat((inv_act[:, 0:1], dxy, inv_act[:, 1:]), dim=1)
+                log_std = conv_out[:, self.action_dim:]
+                log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
+                return mean, log_std
+
+            self._field_type_act = nn.FieldType(gspace, [gspace.irrep(1)] + (5 - 2) * [gspace.trivial_repr])
+            """
             out = self.get(
                 "out",
                 EquivLinear,
