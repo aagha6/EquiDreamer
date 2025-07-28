@@ -110,6 +110,12 @@ class RSSM(nj.Module):
                 gspace,
                 self._act_dim * [gspace.quotient_repr((None, gspace.rotations_order))],
             )
+        elif gspace.fibergroup.name == "C4":
+            # bulletarm
+            self._field_type_act = nn.FieldType(
+                gspace,
+                [gspace.trivial_repr] + [gspace.irrep(1)] + 2 * [gspace.trivial_repr],
+            )
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
         self._field_type_img_in = self._field_type_stoch + self._field_type_act
@@ -314,10 +320,12 @@ class RSSM(nj.Module):
                 act = prev_action @ jnp.array(
                     [[1, -1, 0], [0, 0, 1]], dtype=jnp.float32
                 )
-            else:
+            elif self._grp.grp_act.fibergroup.name == "C2":
                 act = jnp.stack([prev_action, -prev_action], -1).reshape(
                     prev_action.shape[:-1] + (-1,)
                 )
+            elif self._grp.grp_act.fibergroup.name == "C4":
+                act = prev_action
 
             prev_stoch = nn.GeometricTensor(
                 prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch
@@ -865,6 +873,13 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
                 functools.partial(jnp.flip, axis=(-1,)),  # inverse of (1, 0)
                 functools.partial(jnp.flip, axis=(-2,)),  # inverse of (1, 1)
             ]
+        elif self._gspace.fibergroup.name == "C4":
+            basespace_transforms = [
+                functools.partial(jnp.rot90, k=0, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=1, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=2, axes=(-2, -1)),  # inverse of (0, 1)
+                functools.partial(jnp.rot90, k=3, axes=(-2, -1)),  # inverse of (0, 1)s
+            ]
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
 
@@ -1352,6 +1367,7 @@ class EquivMLP(MLP):
         symlog_inputs=False,
         invariant=True,
         cup_catch=False,
+        manipulation=False,
         **kw,
     ):
 
@@ -1419,8 +1435,16 @@ class EquivMLP(MLP):
                         shape[0]
                         * [gspace.quotient_repr((None, gspace.rotations_order))],
                     )
+                elif gspace.fibergroup.name == "C4":
+                    # bulletarm
+                    self._field_out_type = nn.FieldType(
+                        gspace,
+                        [gspace.trivial_repr]
+                        + [gspace.irrep(1)]
+                        + 2 * [gspace.trivial_repr],
+                    )
                 else:
-                    raise NotImplementedError("only implemented for groups C2,D2")
+                    raise NotImplementedError("only implemented for groups D1,D2,C4")
                 act_dim = None
                 if cup_catch:
                     act_dim = 2
@@ -1442,6 +1466,7 @@ class EquivMLP(MLP):
                     key=keys[3],
                 )
                 self._cup_catch = cup_catch
+                self._manipulation = manipulation
             elif self._dist["dist"] == "mse":
                 self.escnn3 = econv_module(
                     in_type=self.feat_type_hidden,
@@ -1523,6 +1548,7 @@ class EquivMLP(MLP):
             self._dist["init_equiv_std"] = self._init_equiv_std
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
+            self._dist["manipulation"] = self._manipulation
         if self._dist["dist"] == "mse":
             self._dist["in_type"] = self.feat_type_hidden
             self._dist["out_type"] = self._field_out_type
@@ -1550,6 +1576,7 @@ class Dist(nj.Module):
         init_equiv_linear=None,
         group_pooling=None,
         cup_catch=False,
+        manipulation=False,
     ):
         assert all(isinstance(dim, int) for dim in shape), shape
         self._shape = shape
@@ -1573,6 +1600,7 @@ class Dist(nj.Module):
             self._init_equiv_actor = init_equiv_actor
             self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
+            self._manipulation = manipulation
             self._group_pooling = group_pooling
         elif init_equiv_linear is not None:
             self._field_in_type = in_type
@@ -1658,11 +1686,12 @@ class Dist(nj.Module):
         if self._dist == "equiv_normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-            if self._cup_catch:
-                out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
-            else:
-                out = out.reshape(out.shape[:-1] + (-1, 2))
-                out = out @ jnp.array([1, -1])
+            if not self._manipulation:
+                if self._cup_catch:
+                    out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
+                else:
+                    out = out.reshape(out.shape[:-1] + (-1, 2))
+                    out = out @ jnp.array([1, -1])
             dist = tfd.Normal(jnp.tanh(out), std)
             dist = tfd.Independent(dist, len(self._shape))
             dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()

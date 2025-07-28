@@ -4,7 +4,16 @@ import embodied
 import numpy as np
 
 
-def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, args):
+def train_eval(
+    agent,
+    train_env,
+    eval_env,
+    train_replay,
+    eval_replay,
+    logger,
+    args,
+    expert_replay=None,
+):
 
     logdir = embodied.Path(args.logdir)
     logdir.mkdirs()
@@ -26,6 +35,8 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
     timer.wrap("env", train_env, ["step"])
     if hasattr(train_replay, "_sample"):
         timer.wrap("replay", train_replay, ["_sample"])
+    if hasattr(expert_replay, "_sample"):
+        timer.wrap("expert_replay", expert_replay, ["_sample"])
 
     nonzeros = set()
 
@@ -65,11 +76,14 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
     driver_train.on_episode(lambda ep, worker: per_episode(ep, mode="train"))
     driver_train.on_step(lambda tran, _: step.increment())
     driver_train.on_step(train_replay.add)
+    if expert_replay is not None:
+        driver_train.on_step(expert_replay.add)
     driver_eval = embodied.Driver(eval_env)
     driver_eval.on_step(eval_replay.add)
     driver_eval.on_episode(lambda ep, worker: per_episode(ep, mode="eval"))
 
-    if train_env.obs_space["image"].shape[-1] == 2:  ## manipulation env
+    # TODO: need to fix this
+    if train_env.obs_space["image"].shape[0] == 128:  ## manipulation env
         init_agent = embodied.ExpertAgent(
             p_range=train_env._envs[0].p_range,
             dx_range=train_env._envs[0].dx_range,
@@ -86,6 +100,8 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
             steps=100,
             planner=isinstance(init_agent, embodied.ExpertAgent),
         )
+    if expert_replay is not None:
+        driver_train._on_steps.pop()  # Remove the expert replay add step.
     print("Prefill eval dataset.")
     while len(eval_replay) < max(args.batch_steps, args.eval_fill):
         driver_eval(
@@ -96,8 +112,11 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
     logger.add(metrics.result())
     logger.write()
 
-    dataset_train = agent.dataset(train_replay.dataset)
-    dataset_eval = agent.dataset(eval_replay.dataset)
+    if expert_replay is not None:
+        dataset_train = agent.dataset([train_replay.dataset, expert_replay.dataset])
+    else:
+        dataset_train = agent.dataset([train_replay.dataset])
+    dataset_eval = agent.dataset([eval_replay.dataset])
     state = [None]  # To be writable from train step function below.
     batch = [None]
 
@@ -146,7 +165,7 @@ def train_eval(agent, train_env, eval_env, train_replay, eval_replay, logger, ar
             driver_eval.reset()
             driver_eval(policy_eval, episodes=max(len(eval_env), args.eval_eps))
         driver_train(policy_train, steps=100)
-        if should_save(step):
-            checkpoint.save()
+        """if should_save(step):
+            checkpoint.save()"""
     logger.write()
     logger.write()

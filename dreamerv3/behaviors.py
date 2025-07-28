@@ -12,7 +12,7 @@ from . import jaxutils
 
 class Greedy(nj.Module):
 
-    def __init__(self, wm, act_space, config, key, grp, cup_catch):
+    def __init__(self, wm, act_space, config, key, grp, cup_catch, manipulation):
         rewfn = lambda s: wm.heads["reward"](s).mean()[1:]
         keys = random.split(key, 2)
         if config.critic_type == "vfunction":
@@ -28,6 +28,7 @@ class Greedy(nj.Module):
             config,
             grp=grp,
             cup_catch=cup_catch,
+            manipulation=manipulation,
             actor_key=keys[1],
             name="ac",
         )

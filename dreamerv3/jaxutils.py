@@ -572,17 +572,13 @@ class SlowUpdater:
 
 class GroupHelper:
     def __init__(self, gspace, n_rotations=None):
-        if gspace == gspaces.flipRot2dOnR2:
+        if gspace == gspaces.flipRot2dOnR2 or gspace == gspaces.rot2dOnR2:
             assert n_rotations is not None
             self.grp_act = gspace(N=n_rotations)
             self.scaler = self.grp_act.regular_repr.size
-            self.num_rotations = n_rotations
-        elif gspace == gspaces.rot2dOnR2:
-            raise ValueError("rot2dOnR2 not supported yet")
         elif gspace == gspaces.flip2dOnR2:
             self.grp_act = gspace()
             self.scaler = self.grp_act.regular_repr.size
-            self.num_rotations = 1
         else:
             raise ValueError("Group not indentified")
 

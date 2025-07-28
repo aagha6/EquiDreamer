@@ -95,8 +95,15 @@ class JAXAgent(embodied.Agent):
         return mets
 
     def dataset(self, generator):
+        assert isinstance(generator, list)
+        assert self.batch_size % len(generator) == 0
+
+        bs = self.batch_size // len(generator)
+        sources = []
+        for g in generator:
+            sources += [g] * bs
         batcher = embodied.Batcher(
-            sources=[generator] * self.batch_size,
+            sources=sources,
             workers=self.data_loaders,
             postprocess=lambda x: self._convert_inps(x, self.train_devices),
             prefetch_source=4,

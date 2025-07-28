@@ -23,6 +23,7 @@ from .batch import BatchEnv
 from .random import RandomAgent
 from .expert import ExpertAgent
 from .distr import Client, Server, BatchServer
+from .smoothing import GaussianSmoothing
 
 from . import logger
 from . import when
