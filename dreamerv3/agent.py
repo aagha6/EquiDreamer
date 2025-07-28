@@ -41,6 +41,7 @@ class Agent(nj.Module):
         self.step = step
         grp = None
         cup_catch = False
+        manipulation = False
         if config.rssm.equiv:
             assert (
                 config.task
@@ -67,6 +68,7 @@ class Agent(nj.Module):
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
             elif "manipulation" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.rot2dOnR2, n_rotations=4)
+                manipulation = True
         wm_key, beh_key = jax.random.split(key, 2)
         if self.config.decoder.mlp_keys == "embed" and self.config.aug.swav:
             raise ValueError("decoding embedding and swav")
@@ -86,6 +88,7 @@ class Agent(nj.Module):
             key=beh_key,
             grp=grp,
             cup_catch=cup_catch,
+            manipulation=manipulation,
             name="task_behavior",
         )
         if config.expl_behavior == "None":
@@ -492,7 +495,15 @@ class WorldModel(nj.Module):
 class ImagActorCritic(nj.Module):
 
     def __init__(
-        self, critics, scales, act_space, config, grp, actor_key, cup_catch=False
+        self,
+        critics,
+        scales,
+        act_space,
+        config,
+        grp,
+        actor_key,
+        cup_catch=False,
+        manipulation=False,
     ):
         critics = {k: v for k, v in critics.items() if scales[k]}
         for key, scale in scales.items():
@@ -504,7 +515,6 @@ class ImagActorCritic(nj.Module):
         disc = act_space.discrete
         self.grad = config.actor_grad_disc if disc else config.actor_grad_cont
         if config.actor_dist_cont == "equiv_normal":
-            self.cup_catch = cup_catch
             self.actor = nets.EquivMLP(
                 name="actor",
                 invariant=False,
@@ -518,7 +528,8 @@ class ImagActorCritic(nj.Module):
                 ),
                 shape=act_space.shape,
                 **config.actor,
-                cup_catch=self.cup_catch,
+                cup_catch=cup_catch,
+                manipulation=manipulation,
                 dist=config.actor_dist_cont,
             )
         else:
