@@ -184,11 +184,15 @@ class Manipulation(embodied.Env):
 
         return action
 
+    def reset(self):
+        state, _, depth_img = self._env.reset()
+        obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+        return obs, procimage
+
     def step(self, action):
         if action["reset"] or self._done:
             self._done = False
-            state, _, depth_img = self._env.reset()
-            obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+            obs, procimage = self.reset()
             return self._obs(obs, procimage, 0.0, is_first=True)
         if self._act_dict:
             action = self._unflatten(action)
@@ -252,3 +256,255 @@ class Manipulation(embodied.Env):
         if hasattr(space, "n"):
             return elements.Space(np.int32, (), 0, space.n)
         return elements.Space(space.dtype, space.shape, space.low, space.high)
+
+
+class ManipulationPOMDP(Manipulation):
+    def __init__(
+        self,
+        task,
+        random_orientation,
+        action_repeat=1,
+        size=(128, 128),
+        obs_key="image",
+        act_key="action",
+    ):
+        self._action_repeat = action_repeat
+        self._size = size
+
+        dpos = 0.05
+        drot = np.pi / 8
+        render = False
+        workspace = np.asarray([[0.3, 0.7], [-0.2, 0.2], [0.01, 0.25]])
+        env_config = {
+            "workspace": workspace,
+            "max_steps": 100,
+            "obs_size": size[0],
+            "render": render,
+            "fast_mode": True,
+            "action_sequence": "pxyzr",
+            "num_objects": 1,
+            "random_orientation": random_orientation,
+            "reward_type": "sparse",
+            "simulate_grasp": True,
+            "perfect_grasp": False,
+            "robot": "kuka",
+            "workspace_check": "point",
+            "physics_mode": "fast",
+            "hard_reset_freq": 1000,
+            "view_scale": 1.0,
+            "object_scale_range": (1, 1),
+            "obs_type": "pixel",
+            "view_type": "camera_center_xyz",
+            "rendering": render,
+        }
+        planner_config = {
+            "random_orientation": random_orientation,
+            "dpos": dpos,
+            "drot": drot,
+        }
+        self.xyz_range = planner_config["dpos"]
+        self.r_range = planner_config["drot"]
+
+        self.p_range = np.array([0, 1])
+        self.dtheta_range = np.array([-drot, drot])
+        self.dx_range = np.array([-dpos, dpos])
+        self.dy_range = np.array([-dpos, dpos])
+        self.dz_range = np.array([-dpos, dpos])
+        self._env = env_factory.createSingleProcessEnv(
+            "pybullet", task, env_config, planner_config
+        )
+
+        self.target_obj_idx = 0
+        self.episode_idx = -1
+        self.include_noise = False
+        self._obs_dict = False
+        self._act_dict = False
+        self._obs_key = obs_key
+        self._act_key = act_key
+        self._done = True
+        self._info = None
+        self._image_processor = AutoImageProcessor.from_pretrained(
+            "microsoft/resnet-18"
+        )
+
+    def query_expert(self):
+        raise NotImplementedError
+
+    def get_next_action(self):
+        return self.query_expert()
+
+    def decode_actions(self, action):
+        action[1:4] *= self.xyz_range  # scale from [-1, 1] to [-0.05, 0.05] for xyz
+        action[4] *= self.r_range  # scale from [-1, 1] to [-np.pi/8, np.pi/8]
+        action[0] = 0.5 * (action[0] + 1)  # [-1, 1] to [0, 1] for p
+
+        return action
+
+    def encode_actions(self, action):
+        action[1:4] /= self.xyz_range
+        action[4] /= self.r_range
+        action[0] = 2 * action[0] - 1
+
+        return action
+
+    def reset(self):
+        self.target_obj_idx = 1 - self.target_obj_idx
+        (state, _, depth_img) = self._env.reset()
+        obs = self.process_obs(state=state, depth_img=depth_img)
+        self.episode_idx += 1
+        return obs
+
+
+class BlockPullingPOMDP(ManipulationPOMDP):
+    def __init__(self, task, action_repeat=1, size=(128, 128)):
+        super().__init__(
+            task="close_loop_pomdp_block_pulling",
+            random_orientation=False,
+            action_repeat=action_repeat,
+            size=size,
+        )
+
+    def query_expert(self):
+        if self.episode_idx % 2 == 1:
+            return self.pull_movable()
+        else:
+            if self._env.env.current_episode_steps <= 10:
+                return self.pull_immovable()
+            elif self._env.env.current_episode_steps <= 12:
+                self.signal_reset_target()
+                return self.move_up()
+            else:
+                return self.pull_movable()
+
+    def signal_reset_target(self):
+        self._env.getNextAction(2)
+
+    def pull_movable(self):
+        """pull the movable block"""
+        action = self._env.getNextAction(1)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def pull_immovable(self):
+        """pull the immovable block"""
+        action = self._env.getNextAction(0)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def move_up(self):
+        """pick the immovable block"""
+        action = self._env.getNextAction(1 - self.target_obj_idx)
+        action = self.encode_actions(action=action)
+        action[1] = 0.0
+        action[2] = 0.0
+        action[3] = 1.0
+
+        return action
+
+
+class BlockPushingPOMDP(ManipulationPOMDP):
+    def __init__(self, task, action_repeat=1, size=(128, 128)):
+        super().__init__(
+            task="close_loop_pomdp_block_pushing",
+            random_orientation=True,
+            action_repeat=action_repeat,
+            size=size,
+        )
+
+    def query_expert(self):
+        if self.episode_idx % 2 == 1:
+            return self.push_movable()
+        else:
+            if self._env.env.current_episode_steps <= 8:
+                return self.push_immovable()
+            elif self._env.env.current_episode_steps <= 10:
+                self.signal_reset_target()
+                return self.do_nothing()
+            else:
+                return self.push_movable()
+
+    def signal_reset_target(self):
+        self._env.getNextAction(2)
+
+    def push_movable(self):
+        action = self._env.getNextAction(1)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def push_immovable(self):
+        action = self._env.getNextAction(0)
+        action = self.encode_actions(action=action)
+        return action
+
+    def do_nothing(self):
+        """pick the immovable block"""
+        action = self._env.getNextAction(1 - self.target_obj_idx)
+        action = self.encode_actions(action=action)
+
+        action[1] = 0.0
+        action[2] = 0.0
+        action[3] = 0.0
+        return action
+
+    def reset(self):
+        self.target_obj_idx = 1 - self.target_obj_idx
+        (state, _, depth_img) = self._env.reset(self.target_obj_idx)
+        obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+        self.episode_idx += 1
+        return obs, procimage
+
+
+class BlockPickingPOMDP(ManipulationPOMDP):
+    def __init__(self, task, action_repeat=1, size=(128, 128)):
+        super().__init__(
+            task="close_loop_pomdp_block_picking",
+            random_orientation=True,
+            action_repeat=action_repeat,
+            size=size,
+        )
+
+    def reset(self):
+        self.target_obj_idx = 1 - self.target_obj_idx
+        (state, _, depth_img) = self._env.reset(self.target_obj_idx)
+        obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+        self.episode_idx += 1
+        return obs, procimage
+
+    def query_expert(self):
+        if self.episode_idx % 2 == 0:
+            return self.pick_movable()
+        else:
+            if self._env.env.current_episode_steps <= 10:
+                return self.pick_immovable()
+            elif self._env.env.current_episode_steps <= 15:
+                return self.move_up()
+            else:
+                return self.pick_movable()
+
+    def pick_movable(self):
+        """pick the movable block"""
+        action = self._env.getNextAction(self.target_obj_idx)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def pick_immovable(self):
+        """pick the immovable block"""
+        action = self._env.getNextAction(1 - self.target_obj_idx)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def move_up(self):
+        """pick the immovable block"""
+        action = self._env.getNextAction(1 - self.target_obj_idx)
+        action = self.encode_actions(action=action)
+
+        action[1] = 0.0
+        action[2] = 0.0
+        action[3] = 1.0
+
+        return action
