@@ -1250,6 +1250,7 @@ class MLP(nj.Module):
         inputs=["tensor"],
         dims=None,
         symlog_inputs=False,
+        manipulation=False,
         **kw,
     ):
         assert shape is None or isinstance(shape, (int, tuple, dict)), shape
@@ -1265,6 +1266,7 @@ class MLP(nj.Module):
             k: v for k, v in kw.items() if k not in distkeys and k != "equiv"
         }
         self._dist = {k: v for k, v in kw.items() if k in distkeys}
+        self._manipulation = manipulation
 
     def __call__(self, inputs, invariant=False):
         if invariant:
@@ -1288,6 +1290,7 @@ class MLP(nj.Module):
             raise ValueError(self._shape)
 
     def _out(self, name, shape, x):
+        self._dist["manipulation"] = self._manipulation
         return self.get(f"dist_{name}", Dist, shape, **self._dist)(x)
 
 
@@ -1378,6 +1381,7 @@ class EquivMLP(MLP):
             inputs=inputs,
             dims=dims,
             symlog_inputs=symlog_inputs,
+            manipulation=manipulation,
             **kw,
         )
         r2_act = grp.grp_act
@@ -1543,7 +1547,7 @@ class EquivMLP(MLP):
             self._dist["group_pooling"] = self.group_pooling
             self._dist["cup_catch"] = self._cup_catch
             self._dist["manipulation"] = self._manipulation
-        if self._dist["dist"] == "mse":
+        elif self._dist["dist"] == "mse":
             self._dist["in_type"] = self.feat_type_hidden
             self._dist["out_type"] = self._field_out_type
             self._dist["init_equiv_linear"] = self._init_equiv_linear
@@ -1582,6 +1586,7 @@ class Dist(nj.Module):
         self._outnorm = outnorm
         self._bins = bins
         self._init_equiv_linear = None
+        self._manipulation = manipulation
         if dist == "equiv_normal":
             assert (
                 in_type is not None
@@ -1594,7 +1599,6 @@ class Dist(nj.Module):
             self._init_equiv_actor = init_equiv_actor
             self._init_equiv_std = init_equiv_std
             self._cup_catch = cup_catch
-            self._manipulation = manipulation
             self._group_pooling = group_pooling
         elif init_equiv_linear is not None:
             self._field_in_type = in_type
@@ -1670,6 +1674,16 @@ class Dist(nj.Module):
         if self._dist == "mse":
             return jaxutils.MSEDist(out, len(self._shape), "cosine")
         if self._dist == "normal":
+            if self._manipulation:
+                # scale from [-1, 1] to [-0.05, 0.05] for xyz
+                pos = out[..., 1:4] * 0.05
+                # scale from [-1, 1] to [-np.pi/8, np.pi/8]
+                r = out[..., 4] * jnp.pi / 8
+                # [-1, 1] to [0, 1] for p
+                p = 0.5 * (out[..., 0] + 1)
+                out = jnp.concatenate(
+                    [p[..., jnp.newaxis], pos, r[..., jnp.newaxis]], -1
+                )
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
             dist = tfd.Normal(jnp.tanh(out), std)
@@ -1680,7 +1694,17 @@ class Dist(nj.Module):
         if self._dist == "equiv_normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-            if not self._manipulation:
+            if self._manipulation:
+                # scale from [-1, 1] to [-0.05, 0.05] for xyz
+                pos = out[..., 1:4] * 0.05
+                # scale from [-1, 1] to [-np.pi/8, np.pi/8]
+                r = out[..., 4] * jnp.pi / 8
+                # [-1, 1] to [0, 1] for p
+                p = 0.5 * (out[..., 0] + 1)
+                out = jnp.concatenate(
+                    [p[..., jnp.newaxis], pos, r[..., jnp.newaxis]], -1
+                )
+            else:
                 if self._cup_catch:
                     out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
                 else:

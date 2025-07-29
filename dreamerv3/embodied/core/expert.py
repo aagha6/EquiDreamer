@@ -34,6 +34,5 @@ class ExpertAgent:
         return unscaled_action.T
 
     def policy(self, plan_actions):
-        action = self.get_action_from_plan(np.array(plan_actions)[np.newaxis])
-        output = {"action": action, "reset": False}
+        output = {"action": np.array(plan_actions)[np.newaxis], "reset": False}
         return output, None

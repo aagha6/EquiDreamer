@@ -42,6 +42,8 @@ class Agent(nj.Module):
         grp = None
         cup_catch = False
         manipulation = False
+        if "manipulation" in config.task:
+            manipulation = True
         if config.rssm.equiv:
             assert (
                 config.task
@@ -68,7 +70,6 @@ class Agent(nj.Module):
                 grp = jaxutils.GroupHelper(gspace=gspaces.flipRot2dOnR2, n_rotations=2)
             elif "manipulation" in config.task:
                 grp = jaxutils.GroupHelper(gspace=gspaces.rot2dOnR2, n_rotations=4)
-                manipulation = True
         wm_key, beh_key = jax.random.split(key, 2)
         if self.config.decoder.mlp_keys == "embed" and self.config.aug.swav:
             raise ValueError("decoding embedding and swav")
@@ -539,6 +540,7 @@ class ImagActorCritic(nj.Module):
                 shape=act_space.shape,
                 **config.actor,
                 dist=config.actor_dist_disc if disc else config.actor_dist_cont,
+                manipulation=manipulation,
             )
         self.retnorms = {
             k: jaxutils.Moments(**config.retnorm, name=f"retnorm_{k}") for k in critics

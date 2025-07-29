@@ -199,9 +199,8 @@ class Manipulation(embodied.Env):
         else:
             action = action[self._act_key]
 
-        scaled_action = self.decode_actions(action)
         (state, _, depth_img), reward, self._done = self._env.step(
-            scaled_action, auto_reset=False
+            action, auto_reset=False
         )
         obs, procimage = self.process_obs(state=state, depth_img=depth_img)
         return self._obs(
@@ -331,7 +330,8 @@ class ManipulationPOMDP(Manipulation):
         raise NotImplementedError
 
     def get_next_action(self):
-        return self.query_expert()
+        action = self.query_expert()
+        return action
 
     def decode_actions(self, action):
         action[1:4] *= self.xyz_range  # scale from [-1, 1] to [-0.05, 0.05] for xyz
@@ -341,10 +341,6 @@ class ManipulationPOMDP(Manipulation):
         return action
 
     def encode_actions(self, action):
-        action[1:4] /= self.xyz_range
-        action[4] /= self.r_range
-        action[0] = 2 * action[0] - 1
-
         return action
 
     def reset(self):
