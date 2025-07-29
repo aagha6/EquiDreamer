@@ -273,7 +273,7 @@ class ManipulationPOMDP(Manipulation):
 
         dpos = 0.05
         drot = np.pi / 8
-        render = True
+        render = False
         workspace = np.asarray([[0.3, 0.7], [-0.2, 0.2], [0.01, 0.25]])
         env_config = {
             "workspace": workspace,
@@ -402,6 +402,59 @@ class BlockPullingPOMDP(ManipulationPOMDP):
         action[3] = 1.0
 
         return action
+
+
+class BlockPushingPOMDP(ManipulationPOMDP):
+    def __init__(self, task, action_repeat=1, size=(128, 128)):
+        super().__init__(
+            task="close_loop_pomdp_block_pushing",
+            random_orientation=True,
+            action_repeat=action_repeat,
+            size=size,
+        )
+
+    def query_expert(self):
+        if self.episode_idx % 2 == 1:
+            return self.push_movable()
+        else:
+            if self._env.env.current_episode_steps <= 8:
+                return self.push_immovable()
+            elif self._env.env.current_episode_steps <= 10:
+                self.signal_reset_target()
+                return self.do_nothing()
+            else:
+                return self.push_movable()
+
+    def signal_reset_target(self):
+        self._env.getNextAction(2)
+
+    def push_movable(self):
+        action = self._env.getNextAction(1)
+        action = self.encode_actions(action=action)
+
+        return action
+
+    def push_immovable(self):
+        action = self._env.getNextAction(0)
+        action = self.encode_actions(action=action)
+        return action
+
+    def do_nothing(self):
+        """pick the immovable block"""
+        action = self._env.getNextAction(1 - self.target_obj_idx)
+        action = self.encode_actions(action=action)
+
+        action[1] = 0.0
+        action[2] = 0.0
+        action[3] = 0.0
+        return action
+
+    def reset(self):
+        self.target_obj_idx = 1 - self.target_obj_idx
+        (state, _, depth_img) = self._env.reset(self.target_obj_idx)
+        obs, procimage = self.process_obs(state=state, depth_img=depth_img)
+        self.episode_idx += 1
+        return obs, procimage
 
 
 class BlockPickingPOMDP(ManipulationPOMDP):
