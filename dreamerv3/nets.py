@@ -1686,7 +1686,7 @@ class Dist(nj.Module):
                 else:
                     out = out.reshape(out.shape[:-1] + (-1, 2))
                     out = out @ jnp.array([1, -1])
-            dist = tfd.Normal(jnp.tanh(out), std)
+            dist = tfd.TruncatedNormal(jnp.tanh(out), std, -1, 1)
             dist = tfd.Independent(dist, len(self._shape))
             dist.minent = np.prod(self._shape) * tfd.Normal(0.0, lo).entropy()
             dist.maxent = np.prod(self._shape) * tfd.Normal(0.0, hi).entropy()
