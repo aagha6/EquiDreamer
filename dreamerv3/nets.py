@@ -114,7 +114,7 @@ class RSSM(nj.Module):
             # bulletarm
             self._field_type_act = nn.FieldType(
                 gspace,
-                [gspace.trivial_repr] + [gspace.irrep(1)] + 2 * [gspace.trivial_repr],
+                3 * [gspace.trivial_repr] + [gspace.irrep(1)],
             )
         else:
             raise NotImplementedError("only implemented for groups C2,D2")
@@ -325,7 +325,11 @@ class RSSM(nj.Module):
                     prev_action.shape[:-1] + (-1,)
                 )
             elif self._grp.grp_act.fibergroup.name == "C4":
-                act = prev_action
+                dxy = prev_action[..., 1:3]
+                inv_act = jnp.concatenate(
+                    (prev_action[..., 0:1], prev_action[..., 3:]), -1
+                )
+                act = jnp.concatenate([inv_act, dxy], -1)
 
             prev_stoch = nn.GeometricTensor(
                 prev_stoch[:, :, jnp.newaxis, jnp.newaxis], self._field_type_stoch
@@ -1432,10 +1436,7 @@ class EquivMLP(MLP):
                 elif gspace.fibergroup.name == "C4":
                     # bulletarm
                     self._field_out_type = nn.FieldType(
-                        gspace,
-                        [gspace.trivial_repr]
-                        + [gspace.irrep(1)]
-                        + 2 * [gspace.trivial_repr],
+                        gspace, [gspace.irrep(1)] + 3 * [gspace.trivial_repr]
                     )
                 else:
                     raise NotImplementedError("only implemented for groups D1,D2,C4")
@@ -1680,7 +1681,11 @@ class Dist(nj.Module):
         if self._dist == "equiv_normal":
             lo, hi = self._minstd, self._maxstd
             std = (hi - lo) * jax.nn.sigmoid(std + 2.0) + lo
-            if not self._manipulation:
+            if self._manipulation:
+                dxy = out[..., 0:2]
+                inv_act = out[..., 2:]
+                out = jnp.concatenate([inv_act[..., 0:1], dxy, inv_act[..., 1:]], -1)
+            else:
                 if self._cup_catch:
                     out = out @ jnp.array([[1, 0], [-1, 0], [0, 1]])
                 else:
