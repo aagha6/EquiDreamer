@@ -1407,12 +1407,10 @@ class EquivMLP(MLP):
             key=keys[1],
             name="s2conv",
         )
+        self.group_pooling = pooling_module(self.feat_type_hidden, name="group_pooling")
         if invariant:
             self._field_out_type = None
             self._init_equiv_actor = None
-            self.group_pooling = pooling_module(
-                self.feat_type_hidden, name="group_pooling"
-            )
         else:
             gspace = grp.grp_act
             if self._dist["dist"] == "equiv_normal":
@@ -1493,7 +1491,6 @@ class EquivMLP(MLP):
                 )
             else:
                 raise ValueError(f"Unknown distribution {self._dist} for equiv MLP")
-            self.group_pooling = None
         self.invariant = invariant
         self.equiv_relu = nn.ReLU(self.feat_type_hidden)
 
@@ -1630,19 +1627,13 @@ class Dist(nj.Module):
                     "act": "none",
                 },
             )(inputs.reshape([-1, inputs.shape[-1]]))
-            std = self.get(
-                "std",
-                EquivLinear,
-                **{
-                    "net": self._init_equiv_std,
-                    "in_type": self._field_in_type,
-                    "out_type": self._field_std_type,
-                    "norm": "none",
-                    "act": "none",
-                },
-            )(inputs.reshape([-1, inputs.shape[-1]]))
             out = out.reshape(inputs.shape[:-1] + (out.shape[-1],)).astype(f32)
-            std = std.reshape(inputs.shape[:-1] + (std.shape[-1],)).astype(f32)
+            x = nn.GeometricTensor(
+                inputs.reshape([-1, inputs.shape[-1]])[:, :, jnp.newaxis, jnp.newaxis],
+                self._field_in_type,
+            )
+            x = self._group_pooling(x).tensor.mean(-1).mean(-1)
+            inputs = x.reshape(inputs.shape[:-1] + (x.shape[-1],)).astype(f32)
         elif self._init_equiv_linear is not None:
             out = self.get(
                 "out",
@@ -1659,7 +1650,7 @@ class Dist(nj.Module):
         else:
             out = self.get("out", Linear, int(np.prod(shape)), **kw)(inputs)
             out = out.reshape(inputs.shape[:-1] + shape).astype(f32)
-        if self._dist in ("normal", "trunc_normal"):
+        if self._dist in ("normal", "trunc_normal", "equiv_normal"):
             std = self.get("std", Linear, int(np.prod(self._shape)), **kw)(inputs)
             std = std.reshape(inputs.shape[:-1] + self._shape).astype(f32)
         if self._dist == "symlog_mse":
