@@ -120,6 +120,10 @@ def train_eval(
     state = [None]  # To be writable from train step function below.
     batch = [None]
 
+    for _ in range(args.n_pretrain_steps):
+        batch[0] = next(dataset_train)
+        outs, state[0], mets = agent.train(batch[0], state[0])
+
     def train_step(tran, worker):
         for _ in range(should_train(step)):
             with timer.scope("dataset_train"):
