@@ -9,11 +9,14 @@ defaults:
   replay_online: False
   eval_dir: ''
   filter: '.*'
+  wandb_project: dreamerv3
+  wandb_name: task
+  tag: task
 
   jax:
     platform: gpu
     jit: True
-    precision: float16
+    precision: float32
     prealloc: True
     debug_nans: False
     logical_cpus: 0
@@ -64,15 +67,16 @@ defaults:
 
   # World Model
   grad_heads: [decoder, reward, cont]
-  rssm: {deter: 4096, units: 1024, stoch: 32, classes: 32, act: silu, norm: layer, initial: learned, unimix: 0.01, unroll: False, action_clip: 1.0, winit: normal, fan: avg}
+  rssm: {deter: 4096, units: 1024, stoch: 32, classes: 32, act: silu, norm: layer, initial: learned, unimix: 0.01, unroll: False, conv_gru: False, equiv: True, action_clip: 1.0, winit: normal, fan: avg, proto: 32}
   encoder: {mlp_keys: '.*', cnn_keys: '.*', act: silu, norm: layer, mlp_layers: 5, mlp_units: 1024, cnn: resnet, cnn_depth: 96, cnn_blocks: 0, resize: stride, winit: normal, fan: avg, symlog_inputs: True, minres: 4}
   decoder: {mlp_keys: '.*', cnn_keys: '.*', act: silu, norm: layer, mlp_layers: 5, mlp_units: 1024, cnn: resnet, cnn_depth: 96, cnn_blocks: 0, image_dist: mse, vector_dist: symlog_mse, inputs: [deter, stoch], resize: stride, winit: normal, fan: avg, outscale: 1.0, minres: 4, cnn_sigmoid: False}
-  reward_head: {layers: 5, units: 1024, act: silu, norm: layer, dist: symlog_disc, outscale: 0.0, outnorm: False, inputs: [deter, stoch], winit: normal, fan: avg, bins: 255}
-  cont_head: {layers: 5, units: 1024, act: silu, norm: layer, dist: binary, outscale: 1.0, outnorm: False, inputs: [deter, stoch], winit: normal, fan: avg}
-  loss_scales: {image: 1.0, vector: 1.0, reward: 1.0, cont: 1.0, dyn: 0.5, rep: 0.1, actor: 1.0, critic: 1.0, slowreg: 1.0}
+  reward_head: {layers: 5, units: 1024, act: silu, norm: layer, dist: symlog_disc, equiv: False, outscale: 0.0, outnorm: False, inputs: [deter, stoch], winit: normal, fan: avg, bins: 255}
+  cont_head: {layers: 5, units: 1024, act: silu, norm: layer, dist: binary, equiv: False, outscale: 1.0, outnorm: False, inputs: [deter, stoch], winit: normal, fan: avg}
+  loss_scales: {image: 1.0, vector: 1.0, reward: 1.0, cont: 1.0, dyn: 0.5, rep: 0.1, actor: 1.0, critic: 1.0, slowreg: 1.0, swav: 1.0, temp: 1.0, norm: 0.0}
   dyn_loss: {impl: kl, free: 1.0}
   rep_loss: {impl: kl, free: 1.0}
-  model_opt: {opt: adam, lr: 1e-4, eps: 1e-8, clip: 1000.0, wd: 0.0, warmup: 0, lateclip: 0.0}
+  model_opt: {opt: adam, lr: 1e-4, eps: 1e-8, clip: 1000.0, wd: 0.0, warmup: 0, lateclip: 0.0, freeze: 1e3}
+  aug: {swav: False, max_delta: 3.0, same_across_time: True, bilinear: True}
 
   # Actor Critic
   actor: {layers: 5, units: 1024, act: silu, norm: layer, minstd: 0.1, maxstd: 1.0, outscale: 1.0, outnorm: False, unimix: 0.01, inputs: [deter, stoch], winit: normal, fan: avg, symlog_inputs: False}
@@ -167,13 +171,36 @@ crafter:
 dmc_vision:
 
   task: dmc_walker_walk
+  run.script: train_eval
+  run.steps: 1e5
+  run.eval_every: 100
+  run.eval_eps: 5
+  envs: {amount: 1, parallel: none}
   run.train_ratio: 512
-  rssm.deter: 512
+  rssm.deter: 256
+  rssm.units: 512
   .*\.cnn_depth: 32
   .*\.layers: 2
   .*\.units: 512
   encoder: {mlp_keys: '$^', cnn_keys: 'image'}
   decoder: {mlp_keys: '$^', cnn_keys: 'image'}
+
+dmc_vision_equidreamer:
+
+  task: dmc_walker_walk
+  run.script: train_eval
+  run.steps: 1e5
+  run.eval_every: 100
+  run.eval_eps: 5
+  envs: {amount: 1, parallel: none}
+  run.train_ratio: 512
+  rssm.deter: 256
+  rssm.units: 512
+  .*\.cnn_depth: 32
+  .*\.layers: 2
+  .*\.units: 512
+  encoder: {mlp_keys: '$^', cnn_keys: 'procimage'}
+  decoder: {mlp_keys: 'embed', cnn_keys: '$^', vector_dist: mse}  
 
 dmc_proprio:
 
