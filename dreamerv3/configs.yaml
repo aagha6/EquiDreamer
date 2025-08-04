@@ -36,7 +36,7 @@ defaults:
     eval_eps: 1
     eval_samples: 1
     train_ratio: 32.0
-    train_fill: 0
+    train_fill: 2500
     eval_fill: 0
     log_zeros: False
     log_keys_video: [image]
@@ -196,6 +196,15 @@ dmc_vision_equidreamer:
   run.train_ratio: 512
   rssm.deter: 256
   rssm.units: 512
+  rssm.stoch: 32
+  rssm.classes: 0
+  rssm.equiv: True
+  rssm.initial: zeros
+  encoder.cnn: frame_averaging
+  encoder.cnn_keys: procimage
+  reward_head.equiv: True
+  cont_head.equiv: True
+  actor_dist_cont: equiv_normal
   .*\.cnn_depth: 32
   .*\.layers: 2
   .*\.units: 512
