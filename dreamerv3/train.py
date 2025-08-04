@@ -1,9 +1,12 @@
+import os
 import subprocess
 import importlib
 import pathlib
 import sys
 import warnings
 from functools import partial as bind
+
+os.environ["MUJOCO_GL"] = "glfw"
 
 warnings.filterwarnings("ignore", ".*box bound precision lowered.*")
 warnings.filterwarnings("ignore", ".*using stateful random seeds*")
@@ -138,8 +141,8 @@ def make_logger(parsed, logdir, step, config):
             embodied.logger.TerminalOutput(config.filter),
             embodied.logger.JSONLOutput(logdir, "metrics.jsonl"),
             embodied.logger.JSONLOutput(logdir, "scores.jsonl", "episode/score"),
-            embodied.logger.TensorBoardOutput(logdir),
-            # embodied.logger.WandBOutput(logdir.name, config),
+            # embodied.logger.TensorBoardOutput(logdir),
+            embodied.logger.WandBOutput(logdir.name, config),
             # embodied.logger.MLFlowOutput(logdir.name),
         ],
         multiplier,
@@ -219,9 +222,7 @@ def wrap_env(env, config):
         elif args.discretize:
             env = wrappers.DiscretizeAction(env, name, args.discretize)
         else:
-            if not env.obs_space["image"].shape[-1] == 2:
-                ## manipulation envs have their own normalization scheme!
-                env = wrappers.NormalizeAction(env, name)
+            env = wrappers.NormalizeAction(env, name)
     env = wrappers.ExpandScalars(env)
     if args.length:
         env = wrappers.TimeLimit(env, args.length, args.reset)
