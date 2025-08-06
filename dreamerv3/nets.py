@@ -852,8 +852,9 @@ class PretrainedImageEncoder(nj.Module):
         self._model.params = self._model.to_fp16(self._model.params)
 
     def __call__(self, x):
-        outputs = self._model(x)
-        return jaxutils.cast_to_compute(outputs.pooler_output)
+        out = self._model(x).pooler_output
+        out = self.get("norm", Norm, "layer")(out)
+        return jaxutils.cast_to_compute(out)
 
 
 class FrameAveragingImageEncoder(PretrainedImageEncoder):
@@ -893,7 +894,9 @@ class FrameAveragingImageEncoder(PretrainedImageEncoder):
         outputs = []
         for bs_trans in self._basespace_transforms:
             ginv_x = bs_trans(input)
-            outputs.append(self._model(ginv_x).pooler_output[:, :, 0, 0])
+            out = self._model(ginv_x).pooler_output[:, :, 0, 0]
+            out = self.get("norm", Norm, "layer")(out)
+            outputs.append(out)
         outputs = jnp.stack(outputs, -1).reshape((input.shape[0], -1))
         return jaxutils.cast_to_compute(outputs)
 
